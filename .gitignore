@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.bunq/
+.DS_Store
+*.log
+node_modules/
+.next/
+dist/
+build/
+.env
+backend/.env
+frontend/.env.local
+*.pyc
+*.sqlite3
+*.db
