@@ -10,7 +10,7 @@ import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from models.schemas import BunqAccountSummary, BunqAuthTestResponse
+from models.schemas import AnalysisResponse, BunqAccountSummary, BunqAuthTestResponse
 
 
 class BunqService:
@@ -19,6 +19,7 @@ class BunqService:
         self.api_key = os.getenv("BUNQ_API_KEY")
         self.private_key_path = os.getenv("BUNQ_PRIVATE_KEY_PATH")
         self.public_key_path = os.getenv("BUNQ_PUBLIC_KEY_PATH")
+        self.user_agent = "FinPilot Inbox Hackathon MVP/1.0"
 
     def _is_configured(self) -> bool:
         return bool(self.api_key)
@@ -70,8 +71,10 @@ class BunqService:
     ) -> dict[str, Any]:
         body_text = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
         headers = {
+            "Accept": "application/json",
             "Cache-Control": "no-cache",
             "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
             "X-Bunq-Client-Signature": self._sign_body(private_key_pem, body_text),
         }
         if token:
@@ -80,6 +83,33 @@ class BunqService:
             headers.update(extra_headers)
 
         response = requests.post(f"{self.base_url}{path}", headers=headers, data=body_text, timeout=20)
+        response.raise_for_status()
+        return response.json()
+
+    def _session_headers(self, token: str) -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
+            "X-Bunq-Client-Authentication": token,
+        }
+
+    def _post_session(self, path: str, body: dict[str, Any], token: str) -> dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}{path}",
+            headers=self._session_headers(token),
+            data=json.dumps(body, separators=(",", ":"), ensure_ascii=False),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _get_session(self, path: str, token: str) -> dict[str, Any]:
+        response = requests.get(
+            f"{self.base_url}{path}",
+            headers=self._session_headers(token),
+            timeout=20,
+        )
         response.raise_for_status()
         return response.json()
 
@@ -152,17 +182,13 @@ class BunqService:
                         iban="NL00BUNQ0123456789",
                     ).model_dump()
                 ],
-            }
+        }
 
         session = self._create_session()
-        headers = {"X-Bunq-Client-Authentication": session["token"]}
-        response = requests.get(
-            f"{self.base_url}/user/{session['user_id']}/monetary-account-bank",
-            headers=headers,
-            timeout=20,
+        payload = self._get_session(
+            f"/user/{session['user_id']}/monetary-account-bank",
+            session["token"],
         )
-        response.raise_for_status()
-        payload = response.json()
         accounts: list[dict[str, Any]] = []
         for item in payload.get("Response", []):
             account = item.get("MonetaryAccountBank")
@@ -179,3 +205,154 @@ class BunqService:
             )
 
         return {"mode": "live", "user_id": session["user_id"], "accounts": accounts}
+
+    def _choose_account(self, accounts_payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        accounts = accounts_payload.get("accounts", [])
+        if not accounts:
+            raise RuntimeError("No bunq monetary account available")
+        return str(accounts_payload.get("user_id", "unknown")), accounts[0]
+
+    def _build_description(self, analysis: AnalysisResponse) -> str:
+        base = (analysis.summary or analysis.document_type.value.replace("_", " ")).strip()
+        reference = analysis.payment_reference.strip() if analysis.payment_reference else None
+        if reference:
+            return f"{base[:90]} | Ref {reference}"[:140]
+        return base[:140]
+
+    def _schedule_payload(self, due_date: Optional[str]) -> Optional[dict[str, Any]]:
+        if not due_date:
+            return None
+        return {
+            "time_start": f"{due_date} 09:00:00.000",
+            "recurrence_unit": "ONCE",
+            "recurrence_size": 1,
+        }
+
+    def create_draft_payment(self, analysis: AnalysisResponse) -> dict[str, Any]:
+        if not analysis.amount or not analysis.iban:
+            raise RuntimeError("Draft payment requires amount and destination IBAN")
+
+        if not self._is_configured():
+            return {
+                "mode": "mock",
+                "status": "prepared",
+                "bunq_action_type": "draft_payment",
+                "bunq_action_id": "mock-draft-payment",
+            }
+
+        session = self._create_session()
+        accounts_payload = self.get_accounts()
+        _, account = self._choose_account(accounts_payload)
+        body: dict[str, Any] = {
+            "status": "PENDING",
+            "entries": [
+                {
+                    "amount": {
+                        "value": f"{analysis.amount:.2f}",
+                        "currency": analysis.currency,
+                    },
+                    "counterparty_alias": {
+                        "type": "IBAN",
+                        "value": analysis.iban,
+                        "name": analysis.recipient_name or analysis.sender or "Detected payee",
+                    },
+                    "description": self._build_description(analysis),
+                    "merchant_reference": analysis.payment_reference or "",
+                }
+            ],
+            "number_of_required_accepts": 1,
+        }
+        schedule = self._schedule_payload(analysis.due_date)
+        if schedule:
+            body["schedule"] = schedule
+
+        payload = self._post_session(
+            f"/user/{session['user_id']}/monetary-account/{account['id']}/draft-payment",
+            body,
+            session["token"],
+        )
+        draft_payment = payload.get("Response", [{}])[0].get("Id", {})
+        return {
+            "mode": "live",
+            "status": "prepared",
+            "bunq_action_type": "draft_payment",
+            "bunq_action_id": str(draft_payment.get("id", "")) or None,
+            "account": account,
+            "user_id": session["user_id"],
+        }
+
+    def create_request_inquiry(self, analysis: AnalysisResponse) -> dict[str, Any]:
+        if not analysis.amount or not analysis.iban:
+            raise RuntimeError("Request inquiry requires amount and counterparty alias")
+
+        if not self._is_configured():
+            return {
+                "mode": "mock",
+                "status": "prepared",
+                "bunq_action_type": "request_inquiry",
+                "bunq_action_id": "mock-request-inquiry",
+            }
+
+        session = self._create_session()
+        accounts_payload = self.get_accounts()
+        _, account = self._choose_account(accounts_payload)
+        body = {
+            "amount_inquired": {
+                "value": f"{analysis.amount:.2f}",
+                "currency": analysis.currency,
+            },
+            "counterparty_alias": {
+                "type": "IBAN",
+                "value": analysis.iban,
+                "name": analysis.recipient_name or analysis.sender or "Detected counterparty",
+            },
+            "description": self._build_description(analysis),
+            "allow_bunqme": False,
+        }
+        payload = self._post_session(
+            f"/user/{session['user_id']}/monetary-account/{account['id']}/request-inquiry",
+            body,
+            session["token"],
+        )
+        request_inquiry = payload.get("Response", [{}])[0].get("Id", {})
+        return {
+            "mode": "live",
+            "status": "prepared",
+            "bunq_action_type": "request_inquiry",
+            "bunq_action_id": str(request_inquiry.get("id", "")) or None,
+            "account": account,
+            "user_id": session["user_id"],
+        }
+
+    def confirm_finpilot_action(self, analysis: AnalysisResponse) -> dict[str, Any]:
+        accounts_payload = self.get_accounts()
+        user_id, account = self._choose_account(accounts_payload)
+
+        if not analysis.action_required:
+            return {
+                "user_id": user_id,
+                "account": account,
+                "status": "not_required",
+                "bunq_action_type": "none",
+                "bunq_action_id": None,
+            }
+
+        if analysis.recommended_action in {"schedule_payment", "pay_now"} and analysis.amount and analysis.iban:
+            result = self.create_draft_payment(analysis)
+            result.setdefault("user_id", user_id)
+            result.setdefault("account", account)
+            return result
+
+        if analysis.recommended_action == "request_money" and analysis.amount and analysis.iban:
+            result = self.create_request_inquiry(analysis)
+            result.setdefault("user_id", user_id)
+            result.setdefault("account", account)
+            return result
+
+        return {
+            "user_id": user_id,
+            "account": account,
+            "status": "prepared",
+            "bunq_action_type": "manual_review",
+            "bunq_action_id": None,
+        }

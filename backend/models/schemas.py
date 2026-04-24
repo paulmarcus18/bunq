@@ -53,6 +53,9 @@ class AnalysisResponse(BaseModel):
     summary: str = "Document analyzed."
     reasoning: str = "Not enough data to recommend a fully automated action."
     confidence: float = Field(default=0.2, ge=0.0, le=1.0)
+    action_required: bool = False
+    direct_debit_detected: bool = False
+    decision_reasons: list[str] = Field(default_factory=list)
 
 
 class ConfirmActionRequest(BaseModel):
@@ -61,12 +64,16 @@ class ConfirmActionRequest(BaseModel):
 
 class PreparedAction(BaseModel):
     type: RecommendedAction
+    bunq_action_type: str
+    execution_state: str
+    bunq_action_id: Optional[str] = None
     amount: Optional[float]
     currency: str
     recipient: Optional[str]
     iban: Optional[str]
     due_date: Optional[str]
     reference: Optional[str]
+    description: Optional[str] = None
 
 
 class ConfirmActionResponse(BaseModel):
@@ -74,6 +81,7 @@ class ConfirmActionResponse(BaseModel):
     message: str
     bunq_user_id: str
     account_used: str
+    account_iban: Optional[str] = None
     prepared_action: PreparedAction
 
 

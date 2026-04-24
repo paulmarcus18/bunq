@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mobile Invoice Demo</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        background: #f4f7f8;
+        color: #102030;
+      }
+      .page {
+        width: 920px;
+        margin: 24px auto;
+        background: white;
+        padding: 40px 48px 56px;
+        box-shadow: 0 10px 30px rgba(16, 32, 48, 0.08);
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 3px solid #102030;
+        padding-bottom: 18px;
+      }
+      .chip {
+        display: inline-block;
+        background: #ddfff4;
+        color: #006b47;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: bold;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 12px 0 4px;
+        font-size: 34px;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-top: 28px;
+      }
+      .card {
+        background: #fafcff;
+        border: 1px solid #d8e4ee;
+        border-radius: 18px;
+        padding: 16px;
+      }
+      .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #607085;
+        margin-bottom: 8px;
+      }
+      .value {
+        font-size: 24px;
+        font-weight: bold;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 26px;
+      }
+      th, td {
+        border-bottom: 1px solid #d8e4ee;
+        padding: 12px 0;
+        text-align: left;
+      }
+      .autopay {
+        margin-top: 26px;
+        border-radius: 18px;
+        border: 1px solid #b8e7d0;
+        background: #edfff6;
+        padding: 18px 20px;
+        line-height: 1.5;
+      }
+      .footer {
+        margin-top: 30px;
+        font-size: 13px;
+        color: #607085;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="top">
+        <div>
+          <span class="chip">Invoice</span>
+          <h1>NorthNet Mobile Monthly Bill</h1>
+          <div>Invoice number: NNM-2026-04-771</div>
+        </div>
+        <div style="text-align:right">
+          <div><strong>Invoice date</strong></div>
+          <div>April 24, 2026</div>
+        </div>
+      </div>
+
+      <div class="summary">
+        <div class="card">
+          <div class="label">Customer</div>
+          <div class="value" style="font-size:20px">Paul Vermeer</div>
+        </div>
+        <div class="card">
+          <div class="label">Total due</div>
+          <div class="value">EUR 64.80</div>
+        </div>
+        <div class="card">
+          <div class="label">Customer IBAN</div>
+          <div class="value" style="font-size:18px">NL11 BUNQ 2044 1133 88</div>
+        </div>
+        <div class="card">
+          <div class="label">Reference</div>
+          <div class="value" style="font-size:18px">NNM-2026-04-771</div>
+        </div>
+      </div>
+
+      <table>
+        <tr>
+          <th>Description</th>
+          <th>Amount</th>
+        </tr>
+        <tr>
+          <td>Unlimited calls &amp; 30 GB plan</td>
+          <td>49.00</td>
+        </tr>
+        <tr>
+          <td>International roaming usage</td>
+          <td>7.80</td>
+        </tr>
+        <tr>
+          <td>Device installment</td>
+          <td>8.00</td>
+        </tr>
+      </table>
+
+      <div class="autopay">
+        We will automatically debit <strong>EUR 64.80</strong> from your account
+        <strong>NL11 BUNQ 2044 1133 88</strong> on <strong>May 3, 2026</strong>.
+        You do not need to make a manual bank transfer. For questions, contact NorthNet Mobile Support.
+      </div>
+
+      <div class="footer">
+        Fictional demo invoice for FinPilot Inbox. The document is designed to test direct-debit detection.
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+Subject: Refund confirmation required today
+
+Dear customer,
+
+A reimbursement of EUR 245.00 is waiting for release. Before we can send the refund, you must first
+verify your payout account by transferring a small validation fee of EUR 1.95 to the account below.
+
+Recipient: Fast Cash Processing Ltd
+IBAN: LT19 REVO 9900 5521 7788
+Reference: REFUND-FAST-VERIFY
+
+Please complete this within 20 minutes to avoid refund cancellation.
+
+This fictional sample exists only for the FinPilot Inbox hackathon demo.

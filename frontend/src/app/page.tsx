@@ -54,7 +54,7 @@ export default function HomePage() {
   }
 
   async function handleConfirmAction() {
-    if (!analysis) {
+    if (!analysis || !analysis.action_required) {
       return;
     }
 
@@ -135,21 +135,44 @@ export default function HomePage() {
           <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
             <p className="font-semibold">{successMessage}</p>
             {confirmResult ? (
-              <p className="mt-2 leading-6">
-                Prepared {confirmResult.prepared_action.type.replaceAll("_", " ")} using{" "}
-                {confirmResult.account_used}. No real payment was sent.
-              </p>
+              <div className="mt-2 space-y-2 leading-6">
+                <p>
+                  Action: {confirmResult.prepared_action.bunq_action_type.replaceAll("_", " ")} via{" "}
+                  {confirmResult.account_used}
+                  {confirmResult.account_iban ? ` (${confirmResult.account_iban})` : ""}.
+                </p>
+                <p>
+                  Beneficiary: {confirmResult.prepared_action.recipient ?? "Unknown"}
+                  {confirmResult.prepared_action.iban
+                    ? ` · Destination ${confirmResult.prepared_action.iban}`
+                    : ""}
+                </p>
+                <p>
+                  Status: {confirmResult.prepared_action.execution_state.replaceAll("_", " ")}
+                  {confirmResult.prepared_action.bunq_action_id
+                    ? ` · bunq id ${confirmResult.prepared_action.bunq_action_id}`
+                    : ""}
+                </p>
+              </div>
             ) : null}
           </section>
         ) : null}
       </div>
 
       {analysis ? (
-        <ActionButton
-          label="Approve and prepare bunq action"
-          loading={actionLoading}
-          onClick={handleConfirmAction}
-        />
+        <>
+          {!analysis.action_required ? (
+            <div className="sticky bottom-0 left-0 right-0 mt-6 border-t border-slate-200 bg-white/90 px-4 py-4 text-center text-sm text-slate-600 backdrop-blur">
+              No payment prep needed right now. FinPilot recommends review only.
+            </div>
+          ) : (
+            <ActionButton
+              label="Confirm and create bunq action"
+              loading={actionLoading}
+              onClick={handleConfirmAction}
+            />
+          )}
+        </>
       ) : null}
     </main>
   );

@@ -18,7 +18,7 @@ function labelize(value: string) {
 
 export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
   const details = [
-    { label: "Receiver", value: analysis.recipient_name ?? analysis.sender ?? "Unknown" },
+    { label: "Beneficiary", value: analysis.recipient_name ?? analysis.sender ?? "Unknown" },
     { label: "IBAN", value: analysis.iban ?? "Not found" },
     { label: "Reference", value: analysis.payment_reference ?? "Not found" },
     { label: "Due date", value: analysis.due_date ?? "No deadline detected" },
@@ -61,6 +61,21 @@ export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
           {labelize(analysis.recommended_action)}
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-600">{analysis.reasoning}</p>
+        {analysis.decision_reasons.length > 0 ? (
+          <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Why this action?</p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {analysis.decision_reasons.map((reason) => (
+                <li key={reason}>• {reason}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {analysis.direct_debit_detected ? (
+          <p className="mt-3 text-sm font-medium text-emerald-700">
+            Automatic debit detected. FinPilot is avoiding a duplicate manual payment.
+          </p>
+        ) : null}
         <p className="mt-3 text-xs text-slate-500">
           Urgency: <span className="font-semibold capitalize">{analysis.urgency}</span>
           {" · "}

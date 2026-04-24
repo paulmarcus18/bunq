@@ -83,25 +83,40 @@ async def analyze_document(
 
 @app.post("/confirm-action", response_model=ConfirmActionResponse)
 def confirm_action(payload: ConfirmActionRequest) -> ConfirmActionResponse:
-    accounts_payload = bunq_service.get_accounts()
-    accounts = accounts_payload.get("accounts", [])
-    account_used = accounts[0]["description"] if accounts else "No account available"
-    user_id = str(accounts_payload.get("user_id", "unknown"))
-
     analysis = payload.analysis
+    bunq_result = bunq_service.confirm_finpilot_action(analysis)
+    account = bunq_result.get("account", {})
+    account_used = account.get("description", "No account available")
+    user_id = str(bunq_result.get("user_id", "unknown"))
+
+    message = "Prepared payment action for review"
+    if bunq_result.get("bunq_action_type") == "draft_payment":
+        message = "Draft bunq payment created and is awaiting user approval"
+    elif bunq_result.get("bunq_action_type") == "request_inquiry":
+        message = "bunq payment request created after user confirmation"
+    elif bunq_result.get("bunq_action_type") == "manual_review":
+        message = "User confirmation received. FinPilot kept this action in manual review mode"
+    elif bunq_result.get("status") == "not_required":
+        message = "User confirmation received, but no bunq action was needed for this document"
+
     return ConfirmActionResponse(
         success=True,
-        message="Prepared payment action for review",
+        message=message,
         bunq_user_id=user_id,
         account_used=account_used,
+        account_iban=account.get("iban"),
         prepared_action=PreparedAction(
             type=analysis.recommended_action,
+            bunq_action_type=str(bunq_result.get("bunq_action_type", "none")),
+            execution_state=str(bunq_result.get("status", "prepared")),
+            bunq_action_id=bunq_result.get("bunq_action_id"),
             amount=analysis.amount,
             currency=analysis.currency,
             recipient=analysis.recipient_name,
             iban=analysis.iban,
             due_date=analysis.due_date,
             reference=analysis.payment_reference,
+            description=analysis.summary,
         ),
     )
 
