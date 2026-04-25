@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ArrowDownCircle,
   Bell,
-  CheckCircle2,
   ChevronRight,
   CircleDollarSign,
   Clock3,
@@ -28,6 +27,8 @@ import {
 import { ActionButton } from "@/components/ActionButton";
 import { ActionReviewCard } from "@/components/ActionReviewCard";
 import { AnalysisResult } from "@/components/AnalysisResult";
+import { BunqPreflightCard } from "@/components/BunqPreflightCard";
+import { BunqReceiptCard } from "@/components/BunqReceiptCard";
 import { UploadCard } from "@/components/UploadCard";
 import {
   AnalysisResponse,
@@ -60,7 +61,7 @@ function hasPositiveAmount(amount: number | null) {
 }
 
 function formatAmount(amount: number | null) {
-  if (!hasPositiveAmount(amount)) {
+  if (amount === null || !hasPositiveAmount(amount)) {
     return "€0.00";
   }
 
@@ -320,8 +321,8 @@ export default function HomePage() {
             <div className="rounded-[1.4rem] border border-white/10 bg-black/85 px-4 py-3 text-center text-sm font-semibold text-white/65 shadow-2xl shadow-black/50 backdrop-blur-xl">
               {analysis.auto_debit_detected
                 ? "Automatic debit detected. No manual bunq payment is needed."
-                : analysis.is_suspicious
-                  ? "Potential phishing detected. bunq payment actions are disabled until you review this request manually."
+                : analysis.risk_level === "blocked"
+                  ? `TrustScore ${analysis.trust_score}/100 — bunq payment blocked until you review this manually.`
                 : analysis.recommended_action === "schedule_payment" && !analysis.due_date
                   ? "Add a due date to enable scheduling."
                   : "Not enough payment details to create a bunq action yet."}
@@ -484,9 +485,9 @@ function InboxScreen({
     >
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">deBunq</p>
-          <p className="mt-1 max-w-[14rem] text-xs font-medium leading-4 text-white/45">
-            debunk every payment request before you pay.
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">deBunq · scam shield</p>
+          <p className="mt-1 max-w-[16rem] text-xs font-medium leading-4 text-white/45">
+            Score every bill, screenshot, email, or voice note before bunq pays anyone.
           </p>
           <h1 className="mt-2 text-4xl font-black tracking-tight">Inbox</h1>
         </div>
@@ -519,17 +520,35 @@ function InboxScreen({
 
         <div className="relative flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Smart money requests</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">deBunq TrustScore</p>
 
             <div className="mt-2 flex items-end gap-2">
-              <h2 className="text-4xl font-black tracking-tight">{detectedTotal}</h2>
-              <span className="mb-1 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-bold text-emerald-300">
-                {analysis ? "analyzed" : "upload"}
+              <h2 className="text-4xl font-black tracking-tight">
+                {analysis ? `${analysis.trust_score}/100` : detectedTotal}
+              </h2>
+              <span
+                className={`mb-1 rounded-full px-2 py-1 text-xs font-bold ${
+                  analysis
+                    ? analysis.risk_level === "safe"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : analysis.risk_level === "blocked"
+                        ? "bg-rose-500/15 text-rose-300"
+                        : "bg-amber-500/15 text-amber-300"
+                    : "bg-emerald-500/15 text-emerald-300"
+                }`}
+              >
+                {analysis
+                  ? analysis.risk_level === "safe"
+                    ? "safe"
+                    : analysis.risk_level === "blocked"
+                      ? "blocked"
+                      : "review"
+                  : "ready"}
               </span>
             </div>
 
-            <p className="mt-2 max-w-[15rem] text-sm leading-5 text-white/55">
-              Drop a bill, fine, invoice, or email. We extract the payment details and prepare a safe bunq next step.
+            <p className="mt-2 max-w-[16rem] text-sm leading-5 text-white/55">
+              Forward a bill, screenshot, email, or WhatsApp voice note. deBunq scores it before bunq pays anyone.
             </p>
           </div>
 
@@ -548,12 +567,12 @@ function InboxScreen({
       <section className="mb-5 rounded-[1.75rem] border border-white/10 bg-[#151515]/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl">
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-black">Scan a document</h2>
-            <p className="text-sm text-white/45">PDF, image, screenshot, or pasted text</p>
+            <h2 className="text-lg font-black">Check a payment request</h2>
+            <p className="text-sm text-white/45">PDF, photo, screenshot, voice note, or pasted text</p>
           </div>
 
           <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs font-black text-blue-300 ring-1 ring-blue-500/25">
-            AI Lens
+            Multimodal AI
           </span>
         </div>
 
@@ -581,8 +600,8 @@ function InboxScreen({
             </div>
 
             <div>
-              <p className="font-black">Analyzing your document...</p>
-              <p className="text-sm text-white/45">Finding IBAN, amount, due date, reference and risk.</p>
+              <p className="font-black">Scoring this request with deBunq...</p>
+              <p className="text-sm text-white/45">Transcribing, parsing, and weighing scam signals across modalities.</p>
             </div>
           </div>
 
@@ -607,8 +626,8 @@ function InboxScreen({
               </div>
 
               <div>
-                <h2 className="font-black">Analysis result</h2>
-                <p className="text-sm text-white/45">Review and edit before preparing a bunq action</p>
+                <h2 className="font-black">deBunq result</h2>
+                <p className="text-sm text-white/45">Trust score, red flags, and bunq next step</p>
               </div>
             </div>
 
@@ -728,6 +747,12 @@ function InboxScreen({
         </motion.div>
       ) : null}
 
+      {analysis && analysis.action_required && !confirmResult ? (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
+          <BunqPreflightCard analysis={analysis} selectedAccount={selectedAccount} />
+        </motion.div>
+      ) : null}
+
       {error ? (
         <motion.section
           initial={{ opacity: 0, y: 10 }}
@@ -742,40 +767,21 @@ function InboxScreen({
         </motion.section>
       ) : null}
 
-      {successMessage ? (
+      {confirmResult ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5"
+        >
+          <BunqReceiptCard result={confirmResult} />
+        </motion.section>
+      ) : successMessage ? (
         <motion.section
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-5 rounded-[1.5rem] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100"
         >
-          <div className="flex gap-3">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
-
-            <div>
-              <p className="font-black">{successMessage}</p>
-
-              {confirmResult ? (
-                <div className="mt-2 space-y-2 leading-6 text-emerald-100/80">
-                  <p>
-                    Action: {confirmResult.prepared_action.bunq_action_type.replaceAll("_", " ")} via {confirmResult.account_used}
-                    {confirmResult.account_iban ? ` (${confirmResult.account_iban})` : ""}.
-                  </p>
-                  <p>
-                    Beneficiary: {confirmResult.prepared_action.beneficiary_name ?? "Unknown"}
-                    {confirmResult.prepared_action.beneficiary_iban
-                      ? ` · Destination ${confirmResult.prepared_action.beneficiary_iban}`
-                      : ""}
-                  </p>
-                  <p>
-                    Status: {confirmResult.prepared_action.execution_state.replaceAll("_", " ")}
-                    {confirmResult.prepared_action.bunq_action_id
-                      ? ` · bunq id ${confirmResult.prepared_action.bunq_action_id}`
-                      : ""}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <p className="font-black">{successMessage}</p>
         </motion.section>
       ) : null}
 

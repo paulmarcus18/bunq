@@ -17,6 +17,22 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from models.schemas import AnalysisResponse, BunqAccountSummary, BunqAuthTestResponse
 
 
+def _is_valid_iban(value: str) -> bool:
+    if not value:
+        return False
+    iban = re.sub(r"\s+", "", value).upper()
+    if not re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}", iban):
+        return False
+    if not (15 <= len(iban) <= 34):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    converted = "".join(str(ord(ch) - 55) if ch.isalpha() else ch for ch in rearranged)
+    try:
+        return int(converted) % 97 == 1
+    except ValueError:
+        return False
+
+
 class BunqService:
     def __init__(self) -> None:
         self.base_url = os.getenv("BUNQ_BASE_URL", "https://public-api.sandbox.bunq.com/v1").rstrip("/")
@@ -287,7 +303,6 @@ class BunqService:
                 "name": analysis.beneficiary_name or analysis.issuer_name or "Detected beneficiary",
             },
             "description": self._build_description(analysis),
-            "merchant_reference": analysis.payment_reference or "",
         }
 
     def _schedule_payload(self, due_date: Optional[str]) -> Optional[dict[str, Any]]:
@@ -323,8 +338,9 @@ class BunqService:
         session = self._create_session()
         accounts_payload = self._accounts_payload_for_session(session)
         _, account = self._choose_account(accounts_payload, source_account_id)
+        endpoint = f"/user/{session['user_id']}/monetary-account/{account['id']}/payment"
         payload = self._post_session(
-            f"/user/{session['user_id']}/monetary-account/{account['id']}/payment",
+            endpoint,
             self._payment_body(analysis),
             session["token"],
             sign_body=True,
@@ -335,6 +351,7 @@ class BunqService:
             "status": "created",
             "bunq_action_type": "payment",
             "bunq_action_id": str(payment.get("id", "")) or None,
+            "bunq_endpoint": f"POST {endpoint}",
             "account": account,
             "user_id": session["user_id"],
         }
@@ -358,13 +375,14 @@ class BunqService:
         session = self._create_session()
         accounts_payload = self._accounts_payload_for_session(session)
         _, account = self._choose_account(accounts_payload, source_account_id)
+        endpoint = f"/user/{session['user_id']}/monetary-account/{account['id']}/schedule-payment"
         body = {
             "payment": self._payment_body(analysis),
             "schedule": self._schedule_payload(analysis.due_date),
             "purpose": "PAYMENT",
         }
         payload = self._post_session(
-            f"/user/{session['user_id']}/monetary-account/{account['id']}/schedule-payment",
+            endpoint,
             body,
             session["token"],
             sign_body=True,
@@ -375,6 +393,7 @@ class BunqService:
             "status": "scheduled",
             "bunq_action_type": "schedule_payment",
             "bunq_action_id": str(schedule_payment.get("id", "")) or None,
+            "bunq_endpoint": f"POST {endpoint}",
             "account": account,
             "user_id": session["user_id"],
         }
@@ -530,6 +549,14 @@ class BunqService:
             and analysis.amount
             and analysis.beneficiary_iban
         ):
+            if not _is_valid_iban(analysis.beneficiary_iban):
+                return {
+                    "user_id": user_id,
+                    "account": account,
+                    "status": "iban_invalid",
+                    "bunq_action_type": "manual_review",
+                    "bunq_action_id": None,
+                }
             if analysis.recommended_action == "schedule_payment" and analysis.due_date:
                 result = self.create_schedule_payment(analysis, source_account_id)
             else:

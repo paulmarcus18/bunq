@@ -1,4 +1,5 @@
 import { AnalysisResponse } from "@/types/analysis";
+import { TrustScoreCard } from "@/components/TrustScoreCard";
 
 function formatCurrency(amount: number | null, currency: string) {
   if (amount === null) {
@@ -20,7 +21,6 @@ export function AnalysisResult({
 }: {
   analysis: AnalysisResponse;
 }) {
-  const suspiciousBlocked = analysis.is_suspicious;
   const details = [
     { label: "Issuer", value: analysis.issuer_name ?? "Unknown" },
     { label: "Beneficiary", value: analysis.beneficiary_name ?? analysis.issuer_name ?? "Unknown" },
@@ -42,29 +42,30 @@ export function AnalysisResult({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Analysis result
+            Document type
           </p>
           <h3 className="mt-2 text-2xl font-semibold capitalize text-slate-950">
             {labelize(analysis.document_type)}
           </h3>
         </div>
-        <span
-          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-            suspiciousBlocked
-              ? "border border-rose-200 bg-rose-50 text-rose-700"
-              : "border border-slate-200 bg-slate-50 text-slate-600"
-          }`}
-        >
-          {suspiciousBlocked ? "Blocked" : analysis.action_required ? "Action ready" : "Review needed"}
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+          {formatCurrency(analysis.amount, analysis.currency)}
         </span>
       </div>
 
-      <div className="mt-5 rounded-3xl bg-slate-950 p-5 text-white">
-        <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Amount</p>
-        <p className="mt-2 text-3xl font-semibold">
-          {formatCurrency(analysis.amount, analysis.currency)}
-        </p>
-        <p className="mt-2 text-sm text-slate-300">{analysis.summary}</p>
+      {analysis.transcript ? (
+        <div className="mt-5 rounded-3xl border border-indigo-200 bg-indigo-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">
+            Heard from voice note
+          </p>
+          <p className="mt-2 text-sm italic leading-6 text-indigo-900">
+            &ldquo;{analysis.transcript}&rdquo;
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-5">
+        <TrustScoreCard analysis={analysis} />
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3">
@@ -95,24 +96,6 @@ export function AnalysisResult({
           );
         })}
       </div>
-
-      {suspiciousBlocked ? (
-        <div className="mt-5 rounded-3xl border border-rose-200 bg-rose-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-rose-700">
-            Potential phishing detected
-          </p>
-          <p className="mt-2 text-sm text-rose-800">
-            FinPilot spotted warning signs and is blocking bunq payment creation for this request.
-          </p>
-          {analysis.phishing_signals.length ? (
-            <ul className="mt-3 space-y-2 text-sm text-rose-800">
-              {analysis.phishing_signals.map((signal) => (
-                <li key={signal}>• {signal}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
     </section>
   );
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import io
 import json
@@ -13,37 +14,87 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image
 
-from models.schemas import AnalysisResponse, DocumentType, RecommendedAction
+from models.schemas import (
+    AnalysisResponse,
+    DocumentType,
+    RecommendedAction,
+    RiskLevel,
+    TrustBreakdown,
+    TrustReason,
+)
 
 
 logger = logging.getLogger(__name__)
-MAX_BEDROCK_IMAGE_BYTES = 5 * 1024 * 1024
+# Bedrock's 5 MB image limit is on the BASE64-encoded payload, which is ~33% larger
+# than raw bytes. Cap raw input around 3.7 MB to stay under after encoding.
+MAX_BEDROCK_RAW_IMAGE_BYTES = int(5 * 1024 * 1024 * 0.74)
 
 
-SYSTEM_PROMPT = """You are a financial document parser for a banking app.
-Analyze the provided document, screenshot, or photo and extract only the fields needed to create a bunq payment or bunq scheduled payment.
+SYSTEM_PROMPT_TEMPLATE = """You are deBunq, the scam-detection layer inside the bunq banking app.
+A user just received a payment request — a paper bill, screenshot of an invoice, a phishing email, or a forwarded WhatsApp voice note from someone claiming to need money.
+Your job is to score how trustworthy the request is on four axes, extract payment fields, and decide whether bunq should pay, schedule, block, or ignore.
 Return valid JSON only.
 
-Rules:
-- document_type must be exactly one of: fine, invoice, utility_bill, tax_letter.
-- Never return unknown. If the category is not obvious, choose the closest of those four.
-- Never invent IBAN, amount, due date, or payment reference.
-- due_date must be returned as YYYY-MM-DD.
-- If the document says payment is due within N days and also shows an invoice or issue date, derive due_date from that information.
-- If uncertain, return null.
-- issuer_name is who issued the document.
-- beneficiary_name is who should receive money from the user.
-- beneficiary_iban is the destination payment IBAN only.
-- payment_reference is the transfer reference / kenmerk / invoice number that should accompany the payment.
-- payment_description is a short transfer description suitable for bunq.
-- manual_payment_required is true only when the user is expected to make a manual bank payment.
-- auto_debit_detected is true only when the document says the amount will be collected automatically or already debited.
-- is_suspicious is true when the request looks like phishing, invoice fraud, spoofing, or social engineering.
-- phishing_signals must be a short list of concrete warning signs, or an empty list when none are found.
+Today's date is __TODAY__. Treat any due_date or invoice date that is on or after today as a normal future date — it is NOT a red flag. Future dates within ~60 days of today are completely standard for invoices.
+
+Extraction rules:
+- document_type must be exactly one of: fine, invoice, utility_bill, tax_letter. Pick the closest match if uncertain.
+- Never invent IBAN, amount, due date, or payment reference. If uncertain, return null.
+- due_date must be YYYY-MM-DD; derive from "due within N days" + invoice/issue date when needed.
+- issuer_name is who issued the request. beneficiary_name is who receives the money.
+- beneficiary_iban is the destination IBAN only (not the user's own account).
+- payment_reference is the transfer reference / kenmerk / invoice number for bunq.
+- payment_description is a short transfer description.
+- manual_payment_required is true only when the user must initiate a bank payment.
+- auto_debit_detected is true only when the document says the amount will be auto-debited.
+
+Trust scoring rules (every score is 0-100, higher = safer):
+- issuer_authenticity: 100 if a known business / government issuer with matching domain/IBAN; 50 unknown; <30 mismatched names, fake-looking issuers, family-impersonation voice notes, no real issuer at all.
+- urgency_pressure: 100 if no time pressure / normal due date; 50 if standard "pay within X days"; <30 for "URGENT", "today only", "before midnight", emotional pressure, secrecy requests.
+- payment_detail_completeness: 100 if IBAN + amount + reference + clear beneficiary all present and consistent; mid for partial; <30 if asking for money with no reference, no IBAN, or generic destination.
+- modality_risk: 100 for an official PDF or printed bill; 80 for a clear photo of a printed/screen invoice from a known issuer; 60 for a screenshot of an email; 40 for forwarded chat text; <25 for a voice note demanding money (voice notes are a known impersonation-scam vector). The user uploading a photo of a bill is normal and expected — that alone is NOT a red flag.
+
+What is NOT a scam signal (do NOT treat these as red flags):
+- The document being a photo or screenshot rather than a PDF — that is just how users forward bills. modality_risk already accounts for this; do NOT also list it under trust_reasons.
+- Standard corporate boilerplate like "this is an automated message", "no-reply", "do not reply to this email".
+- Multiple payment methods offered (card, iDEAL, manual transfer) — this is normal for Dutch B2C invoices.
+- Standard contact phone numbers in international format like +31 (0)10 XXX XXXX.
+- A future invoice or due date within ~60 days of today.
+- The presence of payment-button images that did not render (e.g. "unable to display button"), since email clients often fail to load remote images.
+
+Real scam signals to flag (treat as red flags):
+- Mismatched issuer name vs sender domain / IBAN holder.
+- Urgency or fear language ("URGENT", "account suspended TODAY", "within 2 hours", emotional pressure, secrecy requests).
+- Family-impersonation patterns ("Hi mom", "I lost my phone", "use this new number", "don't tell dad").
+- Generic destination ("this account") or no payment reference where one is expected.
+- IBAN that does not belong to the claimed issuer / is freshly created / is in a different country than expected.
+- Shortened links (bit.ly, tinyurl), QR codes for payment to unknown destinations.
+- Asking for gift cards, crypto, or cash equivalents.
+
+Trust reasons:
+- Return a list of trust_reasons. Each item MUST be a JSON object with two string fields: "text" and "polarity". Never return a stringified Python dict, never wrap the object in extra quotes, never embed the object as a string. Wrong: "\\{'text': 'foo', 'polarity': 'negative'\\}". Right: an actual JSON object.
+- Include 2-5 positive reasons when the request looks safe (e.g. "Issuer KPN matches the IBAN's known beneficiary").
+- Include only CONCRETE negative reasons that fall under "Real scam signals to flag" above. Do NOT add filler red flags just to look thorough.
+- phishing_signals is the negative-only subset, kept for back-compat. Empty list when none.
+
+Decision rules:
+- is_suspicious is true ONLY when there are clear scam signals from the "Real scam signals" list. Do NOT mark a legitimate corporate invoice as suspicious just because it lacks a PDF or has automated-message boilerplate.
 - If auto_debit_detected is true, recommended_action must be ignore.
 - If is_suspicious is true, recommended_action must be review_manually or ignore.
-- If manual payment is required and the document includes amount and beneficiary_iban, choose pay_now or schedule_payment.
+- If manual payment is required AND amount + beneficiary_iban are present AND the request is not suspicious, choose pay_now or schedule_payment.
+- Otherwise recommended_action is review_manually.
+
+Output the JSON with these keys (and only these keys):
+document_type, issuer_name, beneficiary_name, beneficiary_iban, amount, currency, due_date,
+payment_reference, payment_description, manual_payment_required, auto_debit_detected,
+is_suspicious, phishing_signals, recommended_action, summary,
+trust_breakdown (object with issuer_authenticity, urgency_pressure, payment_detail_completeness, modality_risk),
+trust_reasons (list of {text, polarity}).
 """
+
+
+def _build_system_prompt() -> str:
+    return SYSTEM_PROMPT_TEMPLATE.replace("__TODAY__", date.today().isoformat())
 
 
 def _mock_analysis(optional_text: Optional[str]) -> AnalysisResponse:
@@ -64,6 +115,10 @@ def _mock_analysis(optional_text: Optional[str]) -> AnalysisResponse:
         recommended_action=RecommendedAction.review_manually,
         summary="Demo analysis generated because Bedrock was not available.",
         action_required=False,
+        trust_score=50,
+        risk_level=RiskLevel.caution,
+        trust_reasons=[],
+        trust_breakdown=TrustBreakdown(),
     )
 
 
@@ -86,6 +141,10 @@ def _error_analysis(exc: Exception) -> AnalysisResponse:
         recommended_action=RecommendedAction.review_manually,
         summary=f"Bedrock analysis failed: {str(exc).strip()[:180]}",
         action_required=False,
+        trust_score=50,
+        risk_level=RiskLevel.caution,
+        trust_reasons=[],
+        trust_breakdown=TrustBreakdown(),
     )
 
 
@@ -103,7 +162,7 @@ def _prepare_image_for_bedrock(
     if not file_bytes or not content_type or not content_type.startswith("image/"):
         return file_bytes, content_type
 
-    if len(file_bytes) <= MAX_BEDROCK_IMAGE_BYTES:
+    if len(file_bytes) <= MAX_BEDROCK_RAW_IMAGE_BYTES:
         return file_bytes, content_type
 
     image = Image.open(io.BytesIO(file_bytes))
@@ -139,7 +198,7 @@ def _prepare_image_for_bedrock(
         output = io.BytesIO()
         resized.save(output, format="JPEG", optimize=True, quality=quality)
         compressed = output.getvalue()
-        if len(compressed) <= MAX_BEDROCK_IMAGE_BYTES:
+        if len(compressed) <= MAX_BEDROCK_RAW_IMAGE_BYTES:
             return compressed, "image/jpeg"
 
     raise ValueError(
@@ -421,6 +480,84 @@ def _is_generic_beneficiary(value: Optional[str]) -> bool:
     return normalized in generic_values or normalized.startswith("this ")
 
 
+def _clamp_score(value: Any, fallback: int = 50) -> int:
+    try:
+        score = int(round(float(value)))
+    except (TypeError, ValueError):
+        return fallback
+    return max(0, min(100, score))
+
+
+def _normalize_breakdown(raw: Any) -> dict[str, int]:
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "issuer_authenticity": _clamp_score(raw.get("issuer_authenticity"), 50),
+        "urgency_pressure": _clamp_score(raw.get("urgency_pressure"), 50),
+        "payment_detail_completeness": _clamp_score(raw.get("payment_detail_completeness"), 50),
+        "modality_risk": _clamp_score(raw.get("modality_risk"), 60),
+    }
+
+
+def _composite_score(breakdown: dict[str, int]) -> int:
+    weights = {
+        "issuer_authenticity": 0.35,
+        "urgency_pressure": 0.30,
+        "payment_detail_completeness": 0.20,
+        "modality_risk": 0.15,
+    }
+    total = sum(breakdown[key] * weight for key, weight in weights.items())
+    return max(0, min(100, int(round(total))))
+
+
+def _risk_level_for(score: int, is_suspicious: bool) -> str:
+    if is_suspicious or score < 40:
+        return RiskLevel.blocked.value
+    if score < 75:
+        return RiskLevel.caution.value
+    return RiskLevel.safe.value
+
+
+def _coerce_reason_item(item: Any) -> tuple[str, str]:
+    if isinstance(item, dict):
+        return (
+            str(item.get("text") or item.get("reason") or "").strip(),
+            str(item.get("polarity") or "negative").strip().lower(),
+        )
+
+    text = str(item).strip()
+    if text.startswith("{") and "text" in text:
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+            except (ValueError, SyntaxError):
+                continue
+            if isinstance(parsed, dict):
+                return (
+                    str(parsed.get("text") or parsed.get("reason") or "").strip(),
+                    str(parsed.get("polarity") or "negative").strip().lower(),
+                )
+    return text, "negative"
+
+
+def _normalize_trust_reasons(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    reasons: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        text, polarity = _coerce_reason_item(item)
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        reasons.append(
+            {
+                "text": text,
+                "polarity": "positive" if polarity.startswith("pos") else "negative",
+            }
+        )
+    return reasons
+
+
 def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     normalized["document_type"] = _normalize_document_type(payload.get("document_type"))
@@ -448,6 +585,11 @@ def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized["recommended_action"] = _normalize_recommended_action(payload.get("recommended_action"))
     normalized["summary"] = _normalize_text(payload.get("summary")) or "Document analyzed."
     normalized["action_required"] = False
+    breakdown = _normalize_breakdown(payload.get("trust_breakdown"))
+    normalized["trust_breakdown"] = breakdown
+    normalized["trust_reasons"] = _normalize_trust_reasons(payload.get("trust_reasons"))
+    normalized["trust_score"] = _composite_score(breakdown)
+    normalized["risk_level"] = _risk_level_for(normalized["trust_score"], normalized["is_suspicious"])
     return normalized
 
 
@@ -608,18 +750,7 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
         beneficiary_iban = None
 
     phishing_signals = list(analysis.phishing_signals)
-    inferred_signals = _infer_phishing_signals(
-        optional_text,
-        issuer_name,
-        beneficiary_name,
-        beneficiary_iban,
-        analysis.amount,
-        analysis.payment_reference,
-    )
-    for signal in inferred_signals:
-        if signal not in phishing_signals:
-            phishing_signals.append(signal)
-    is_suspicious = analysis.is_suspicious or bool(phishing_signals)
+    is_suspicious = analysis.is_suspicious
 
     manual_payment_required = analysis.manual_payment_required
     if beneficiary_iban and not auto_debit_detected:
@@ -660,6 +791,25 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
 
     payment_description = analysis.payment_description or analysis.payment_reference or summary
 
+    existing_reason_texts = {reason.text.lower() for reason in analysis.trust_reasons}
+    extra_reasons: list[TrustReason] = []
+    for signal in phishing_signals:
+        if signal.lower() not in existing_reason_texts:
+            extra_reasons.append(TrustReason(text=signal, polarity="negative"))
+            existing_reason_texts.add(signal.lower())
+    trust_reasons = list(analysis.trust_reasons) + extra_reasons
+
+    breakdown = analysis.trust_breakdown.model_copy()
+    if is_suspicious:
+        breakdown.urgency_pressure = min(breakdown.urgency_pressure, 25)
+        breakdown.issuer_authenticity = min(breakdown.issuer_authenticity, 35)
+    if auto_debit_detected:
+        breakdown.payment_detail_completeness = max(breakdown.payment_detail_completeness, 80)
+
+    breakdown_dict = breakdown.model_dump()
+    trust_score = _composite_score(breakdown_dict)
+    risk_level = _risk_level_for(trust_score, is_suspicious)
+
     return analysis.model_copy(
         update={
             "issuer_name": issuer_name,
@@ -675,6 +825,10 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
             "summary": summary,
             "payment_description": payment_description,
             "action_required": action_required,
+            "trust_reasons": trust_reasons,
+            "trust_breakdown": breakdown,
+            "trust_score": trust_score,
+            "risk_level": risk_level,
         }
     )
 
@@ -708,7 +862,7 @@ def _build_messages(
                 "Return JSON only with keys: "
                 "document_type, issuer_name, beneficiary_name, beneficiary_iban, amount, currency, due_date, "
                 "payment_reference, payment_description, manual_payment_required, auto_debit_detected, "
-                "is_suspicious, phishing_signals, recommended_action, summary."
+                "is_suspicious, phishing_signals, recommended_action, summary, trust_breakdown, trust_reasons."
             ),
         }
     )
@@ -752,7 +906,7 @@ def analyze_document_with_claude(
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 900,
             "temperature": 0,
-            "system": SYSTEM_PROMPT,
+            "system": _build_system_prompt(),
             "messages": _build_messages(file_bytes, content_type, optional_text),
         }
         response = client.invoke_model(

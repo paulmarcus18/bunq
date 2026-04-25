@@ -20,6 +20,24 @@ class RecommendedAction(str, Enum):
     ignore = "ignore"
 
 
+class RiskLevel(str, Enum):
+    safe = "safe"
+    caution = "caution"
+    blocked = "blocked"
+
+
+class TrustReason(BaseModel):
+    text: str
+    polarity: str = "negative"
+
+
+class TrustBreakdown(BaseModel):
+    issuer_authenticity: int = 50
+    urgency_pressure: int = 50
+    payment_detail_completeness: int = 50
+    modality_risk: int = 50
+
+
 class AnalysisResponse(BaseModel):
     document_type: DocumentType = DocumentType.invoice
     issuer_name: Optional[str] = None
@@ -37,6 +55,12 @@ class AnalysisResponse(BaseModel):
     recommended_action: RecommendedAction = RecommendedAction.review_manually
     summary: str = "Document analyzed."
     action_required: bool = False
+    transcript: Optional[str] = None
+    input_modality: str = "document"
+    trust_score: int = 50
+    risk_level: RiskLevel = RiskLevel.caution
+    trust_reasons: list[TrustReason] = Field(default_factory=list)
+    trust_breakdown: TrustBreakdown = Field(default_factory=TrustBreakdown)
 
 
 class ConfirmActionRequest(BaseModel):
@@ -56,6 +80,10 @@ class PreparedAction(BaseModel):
     due_date: Optional[str]
     reference: Optional[str]
     description: Optional[str] = None
+    bunq_endpoint: Optional[str] = None
+    bunq_mode: str = "live"
+    trust_score: int = 50
+    risk_level: str = "caution"
 
 
 class ConfirmActionResponse(BaseModel):

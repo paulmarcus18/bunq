@@ -15,3 +15,4 @@ frontend/.env.local
 *.pyc
 *.sqlite3
 *.db
+*.tsbuildinfo

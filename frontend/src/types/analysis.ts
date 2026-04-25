@@ -27,6 +27,17 @@ export interface AnalysisResponse {
   recommended_action: RecommendedAction;
   summary: string;
   action_required: boolean;
+  transcript: string | null;
+  input_modality: "document" | "voice";
+  trust_score: number;
+  risk_level: "safe" | "caution" | "blocked";
+  trust_reasons: { text: string; polarity: "positive" | "negative" }[];
+  trust_breakdown: {
+    issuer_authenticity: number;
+    urgency_pressure: number;
+    payment_detail_completeness: number;
+    modality_risk: number;
+  };
 }
 
 export interface BunqAccountSummary {
@@ -61,5 +72,9 @@ export interface ConfirmActionResponse {
     due_date: string | null;
     reference: string | null;
     description: string | null;
+    bunq_endpoint: string | null;
+    bunq_mode: string;
+    trust_score: number;
+    risk_level: "safe" | "caution" | "blocked";
   };
 }
