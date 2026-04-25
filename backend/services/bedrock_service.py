@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 import boto3
@@ -25,6 +25,8 @@ Rules:
 - document_type must be exactly one of: fine, invoice, utility_bill, tax_letter.
 - Never return unknown. If the category is not obvious, choose the closest of those four.
 - Never invent IBAN, amount, due date, or payment reference.
+- due_date must be returned as YYYY-MM-DD.
+- If the document says payment is due within N days and also shows an invoice or issue date, derive due_date from that information.
 - If uncertain, return null.
 - issuer_name is who issued the document.
 - beneficiary_name is who should receive money from the user.
@@ -117,6 +119,38 @@ def _normalize_amount(value: Any) -> Optional[float]:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_date_value(value: str) -> Optional[date]:
+    text = value.strip()
+    if not text:
+        return None
+
+    formats = (
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%d.%m.%Y",
+        "%Y/%m/%d",
+        "%Y.%m.%d",
+    )
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _normalize_due_date(value: Any) -> Optional[str]:
+    text = _normalize_text(value)
+    if not text:
+        return None
+
+    parsed = _parse_date_value(text)
+    if parsed:
+        return parsed.isoformat()
+    return text
 
 
 def _normalize_document_type(value: Any) -> str:
@@ -334,7 +368,7 @@ def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized["amount"] = _normalize_amount(payload.get("amount"))
     currency = str(payload.get("currency") or "EUR").strip().upper()
     normalized["currency"] = currency if len(currency) == 3 else "EUR"
-    normalized["due_date"] = _normalize_text(payload.get("due_date"))
+    normalized["due_date"] = _normalize_due_date(payload.get("due_date"))
     normalized["payment_reference"] = _normalize_text(payload.get("payment_reference"))
     normalized["payment_description"] = _normalize_text(payload.get("payment_description"))
     normalized["manual_payment_required"] = _normalize_bool(payload.get("manual_payment_required"))
@@ -373,6 +407,44 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
     if _is_generic_beneficiary(beneficiary_name):
         beneficiary_name = issuer_name or beneficiary_name
 
+    due_date = analysis.due_date
+    combined_text = "\n".join(part for part in [optional_text, analysis.summary] if part)
+    relative_due_match = re.search(r"\bwithin\s+(\d{1,3})\s+days?\b", combined_text, re.IGNORECASE)
+    if not relative_due_match:
+        relative_due_match = re.search(r"\bbinnen\s+(\d{1,3})\s+dagen?\b", combined_text, re.IGNORECASE)
+
+    if relative_due_match:
+        explicit_due_patterns = [
+            r"(?:due date|due on|payment due|vervaldag)\D*(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})",
+        ]
+        explicit_due_date: Optional[date] = None
+        for pattern in explicit_due_patterns:
+            match = re.search(pattern, combined_text, re.IGNORECASE)
+            if match:
+                explicit_due_date = _parse_date_value(match.group(1))
+                if explicit_due_date:
+                    break
+
+        if explicit_due_date:
+            due_date = explicit_due_date.isoformat()
+        else:
+            invoice_date_patterns = [
+                r"(?:invoice date|issue date|factuurdatum)\D*(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})",
+            ]
+            base_date: Optional[date] = None
+            for pattern in invoice_date_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    base_date = _parse_date_value(match.group(1))
+                    if base_date:
+                        break
+
+            if not base_date and due_date:
+                base_date = _parse_date_value(due_date)
+
+            if base_date:
+                due_date = (base_date + timedelta(days=int(relative_due_match.group(1)))).isoformat()
+
     beneficiary_iban = analysis.beneficiary_iban
     if auto_debit_detected and _is_user_account_iban(beneficiary_iban, optional_text):
         beneficiary_iban = None
@@ -389,9 +461,9 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
     elif analysis.amount is not None and beneficiary_iban and manual_payment_required:
         action_required = True
         recommended_action = RecommendedAction.pay_now
-        if document_type == DocumentType.invoice and analysis.due_date:
+        if document_type == DocumentType.invoice and due_date:
             try:
-                due = date.fromisoformat(analysis.due_date)
+                due = date.fromisoformat(due_date)
                 if due > date.today():
                     recommended_action = RecommendedAction.schedule_payment
             except ValueError:
@@ -418,6 +490,7 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
             "document_type": document_type,
             "beneficiary_name": beneficiary_name,
             "beneficiary_iban": beneficiary_iban,
+            "due_date": due_date,
             "manual_payment_required": manual_payment_required,
             "auto_debit_detected": auto_debit_detected,
             "recommended_action": recommended_action,

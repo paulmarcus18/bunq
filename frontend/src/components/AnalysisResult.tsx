@@ -15,7 +15,15 @@ function labelize(value: string) {
   return value.replaceAll("_", " ");
 }
 
-export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
+export function AnalysisResult({
+  analysis,
+  onChange,
+}: {
+  analysis: AnalysisResponse;
+  onChange?: (patch: Partial<AnalysisResponse>) => void;
+}) {
+  const scheduleDisabled = analysis.auto_debit_detected || !analysis.due_date;
+  const payNowDisabled = analysis.auto_debit_detected;
   const details = [
     { label: "Issuer", value: analysis.issuer_name ?? "Unknown" },
     { label: "Beneficiary", value: analysis.beneficiary_name ?? analysis.issuer_name ?? "Unknown" },
@@ -67,12 +75,71 @@ export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
 
       <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
         <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Recommended action</p>
-        <p className="mt-2 text-lg font-semibold capitalize text-slate-950">
-          {labelize(analysis.recommended_action)}
-        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={payNowDisabled}
+            onClick={() =>
+              onChange?.({
+                recommended_action: "pay_now",
+              })
+            }
+            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              analysis.recommended_action === "pay_now"
+                ? "bg-slate-950 text-white"
+                : "border border-slate-200 bg-slate-50 text-slate-700"
+            } ${payNowDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+          >
+            Pay now
+          </button>
+          <button
+            type="button"
+            disabled={scheduleDisabled}
+            onClick={() =>
+              onChange?.({
+                recommended_action: "schedule_payment",
+              })
+            }
+            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              analysis.recommended_action === "schedule_payment"
+                ? "bg-slate-950 text-white"
+                : "border border-slate-200 bg-slate-50 text-slate-700"
+            } ${scheduleDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+          >
+            Schedule
+          </button>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Chosen date</p>
+              <p className="mt-1 text-sm text-slate-700">
+                {analysis.due_date ?? "No due date detected yet"}
+              </p>
+            </div>
+            <input
+              type="date"
+              value={analysis.due_date ?? ""}
+              onChange={(event) => onChange?.({ due_date: event.target.value || null })}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+            />
+          </div>
+          {analysis.recommended_action === "schedule_payment" ? (
+            <p className="mt-3 text-sm text-slate-600">
+              FinPilot will create a bunq scheduled payment before this due date.
+            </p>
+          ) : null}
+        </div>
+
         {analysis.auto_debit_detected ? (
           <p className="mt-3 text-sm font-medium text-emerald-700">
             Automatic debit detected. FinPilot is avoiding a duplicate manual payment.
+          </p>
+        ) : null}
+        {!analysis.auto_debit_detected && !analysis.due_date ? (
+          <p className="mt-3 text-sm font-medium text-amber-700">
+            Add a due date to enable the schedule option.
           </p>
         ) : null}
         {!analysis.auto_debit_detected && analysis.manual_payment_required ? (

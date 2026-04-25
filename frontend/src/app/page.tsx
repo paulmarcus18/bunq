@@ -8,6 +8,36 @@ import { AnalysisResponse, ConfirmActionResponse } from "@/types/analysis";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+function hasPositiveAmount(amount: number | null) {
+  return typeof amount === "number" && Number.isFinite(amount) && amount > 0;
+}
+
+function normalizeAnalysis(analysis: AnalysisResponse): AnalysisResponse {
+  const dueDate = analysis.due_date?.trim() || null;
+  const beneficiaryIban = analysis.beneficiary_iban?.trim() || null;
+  const hasPaymentDetails =
+    Boolean(beneficiaryIban) && hasPositiveAmount(analysis.amount) && analysis.manual_payment_required;
+
+  let recommendedAction = analysis.recommended_action;
+  let actionRequired = false;
+
+  if (analysis.auto_debit_detected) {
+    recommendedAction = "ignore";
+  } else if (recommendedAction === "schedule_payment") {
+    actionRequired = hasPaymentDetails && Boolean(dueDate);
+  } else if (recommendedAction === "pay_now") {
+    actionRequired = hasPaymentDetails;
+  }
+
+  return {
+    ...analysis,
+    beneficiary_iban: beneficiaryIban,
+    due_date: dueDate,
+    recommended_action: recommendedAction,
+    action_required: actionRequired,
+  };
+}
+
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
@@ -52,7 +82,7 @@ export default function HomePage() {
       }
 
       const data = (await response.json()) as AnalysisResponse;
-      setAnalysis(data);
+      setAnalysis(normalizeAnalysis(data));
     } catch (submissionError) {
       const message =
         submissionError instanceof Error ? submissionError.message : "Unknown error";
@@ -96,6 +126,18 @@ export default function HomePage() {
     }
   }
 
+  function handleAnalysisChange(patch: Partial<AnalysisResponse>) {
+    setAnalysis((current) => {
+      if (!current) {
+        return current;
+      }
+      return normalizeAnalysis({
+        ...current,
+        ...patch,
+      });
+    });
+  }
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-md px-4 pb-28 pt-6">
       <section className="mb-5 rounded-[32px] bg-slate-950 px-5 py-6 text-white shadow-panel">
@@ -132,7 +174,7 @@ export default function HomePage() {
           </section>
         ) : null}
 
-        {analysis ? <AnalysisResult analysis={analysis} /> : null}
+        {analysis ? <AnalysisResult analysis={analysis} onChange={handleAnalysisChange} /> : null}
 
         {error ? (
           <section className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -174,7 +216,9 @@ export default function HomePage() {
             <div className="sticky bottom-0 left-0 right-0 mt-6 border-t border-slate-200 bg-white/90 px-4 py-4 text-center text-sm text-slate-600 backdrop-blur">
               {analysis.auto_debit_detected
                 ? "Automatic debit detected. No manual bunq payment is needed."
-                : "Not enough payment details to create a bunq action yet."}
+                : analysis.recommended_action === "schedule_payment" && !analysis.due_date
+                  ? "Add a due date to enable scheduling."
+                  : "Not enough payment details to create a bunq action yet."}
             </div>
           ) : (
             <ActionButton

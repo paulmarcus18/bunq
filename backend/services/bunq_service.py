@@ -414,6 +414,24 @@ class BunqService:
         accounts_payload = self.get_accounts()
         user_id, account = self._choose_account(accounts_payload)
 
+        if analysis.auto_debit_detected:
+            return {
+                "user_id": user_id,
+                "account": account,
+                "status": "not_required",
+                "bunq_action_type": "none",
+                "bunq_action_id": None,
+            }
+
+        if analysis.recommended_action == "schedule_payment" and not analysis.due_date:
+            return {
+                "user_id": user_id,
+                "account": account,
+                "status": "prepared",
+                "bunq_action_type": "manual_review",
+                "bunq_action_id": None,
+            }
+
         if not analysis.action_required:
             return {
                 "user_id": user_id,
