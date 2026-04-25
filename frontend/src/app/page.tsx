@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowDownCircle,
   Bell,
+  Bitcoin,
   ChevronRight,
   CircleDollarSign,
   Clock3,
@@ -20,6 +21,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
   Upload,
   Wallet,
   WalletCards,
@@ -39,7 +41,7 @@ import {
 
 const API_BASE = "/api";
 
-type Screen = "home" | "inbox" | "budget" | "docs";
+type Screen = "home" | "inbox" | "budget" | "stocks" | "crypto";
 
 function dismissKeyboard() {
   if (typeof document === "undefined") {
@@ -305,14 +307,16 @@ export default function HomePage() {
           />
         ) : null}
         {activeScreen === "budget" ? <BudgetScreen /> : null}
-        {activeScreen === "docs" ? <DocsScreen /> : null}
+        {activeScreen === "stocks" ? <StocksScreen /> : null}
+        {activeScreen === "crypto" ? <CryptoScreen /> : null}
       </section>
 
       <nav className="fixed bottom-4 left-1/2 z-20 flex w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 items-center justify-around rounded-[1.75rem] border border-white/10 bg-black/80 px-4 py-3 shadow-2xl shadow-black/60 backdrop-blur-xl">
         <NavItem icon={Home} label="Home" active={activeScreen === "home"} onClick={() => setActiveScreen("home")} />
         <NavItem icon={Mail} label="Inbox" active={activeScreen === "inbox"} onClick={() => setActiveScreen("inbox")} />
         <NavItem icon={PieChart} label="Budget" active={activeScreen === "budget"} onClick={() => setActiveScreen("budget")} />
-        <NavItem icon={FileText} label="Docs" active={activeScreen === "docs"} onClick={() => setActiveScreen("docs")} />
+        <NavItem icon={TrendingUp} label="Stocks" active={activeScreen === "stocks"} onClick={() => setActiveScreen("stocks")} />
+        <NavItem icon={Bitcoin} label="Crypto" active={activeScreen === "crypto"} onClick={() => setActiveScreen("crypto")} />
       </nav>
 
       {activeScreen === "inbox" && analysis ? (
@@ -485,9 +489,11 @@ function InboxScreen({
     >
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">deBunq · scam shield</p>
-          <p className="mt-1 max-w-[16rem] text-xs font-medium leading-4 text-white/45">
-            Score every bill, screenshot, email, or voice note before bunq pays anyone.
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">
+            deBunq · scam shield
+          </p>
+          <p className="mt-1 max-w-[17rem] text-xs font-medium leading-4 text-white/45">
+            deBunq debunks every payment request before you pay.
           </p>
           <h1 className="mt-2 text-4xl font-black tracking-tight">Inbox</h1>
         </div>
@@ -820,18 +826,35 @@ function BudgetScreen() {
   );
 }
 
-function DocsScreen() {
+function StocksScreen() {
   return (
     <PlaceholderScreen
-      eyebrow="Documents"
-      title="Docs"
-      amount="18"
-      badge="stored"
-      description="A clean document vault for bills, fines, tax letters, and proof of payment."
+      eyebrow="Stocks"
+      title="Stocks"
+      amount="€2,430.80"
+      badge="+4.2%"
+      description="A bunq-style investing overview using demo values. This screen is only visual for now."
       cards={[
-        ["Parking fine", "PDF", "Uploaded today"],
-        ["Energy bill", "PDF", "Analyzed"],
-        ["Tax letter", "Image", "Needs review"],
+        ["AAPL", "€820.40", "+1.8% today"],
+        ["TSLA", "€640.10", "-0.6% today"],
+        ["ASML", "€970.30", "+2.4% today"],
+      ]}
+    />
+  );
+}
+
+function CryptoScreen() {
+  return (
+    <PlaceholderScreen
+      eyebrow="Crypto"
+      title="Crypto"
+      amount="€918.64"
+      badge="+7.1%"
+      description="A bunq-style crypto overview using demo values. This screen is only visual for now."
+      cards={[
+        ["Bitcoin", "€520.00", "+3.2% today"],
+        ["Ethereum", "€298.64", "+1.9% today"],
+        ["Solana", "€100.00", "+5.6% today"],
       ]}
     />
   );

@@ -1,62 +1,69 @@
-# deBunq · demo video script (3 min target)
+# deBunq · demo video script
 
-A minute-by-minute storyboard for the 2–4 minute Devpost video. Designed to land **all five rubric criteria** without ever feeling like a feature list. Optimised for **screen recording the iPhone** (or a desktop browser sized to phone width if the iPhone tunnel isn't ready by recording time).
+Target length: **3 minutes**
 
-If you only have time to record one take, this is it.
+Goal: show that deBunq is not just a scanner or spam filter.
+It is a **scam shield inside the payment flow**.
 
 ---
 
 ## Total: 3:00
 
-| Block | Time | Visual | Voiceover |
-|---|---|---|---|
-| **A. Hook** | 0:00–0:15 | Title card → cut to a real WhatsApp voice-note screenshot | *"Last year, Dutch banks lost over a hundred million euros to scams users authorised themselves. Fake invoices. 'Hi mom' voice notes. Phishing emails with a swapped IBAN. None of it gets refunded — because the user pressed pay. So the only place to stop the scam is **before** the user pays."* |
-| **B. Setup** | 0:15–0:25 | Cut to deBunq inbox screen on iPhone | *"Meet deBunq — the scam shield inside the bunq app. Forward a voice note, snap a bill, paste a suspicious email. Multimodal AI scores it before bunq pays anyone."* |
-| **C. Scenario 1 — voice scam** | 0:25–1:05 | Tap **Forward voice note** → upload `hi-mom.m4a` → tap analyse | *"Here's a voice note someone forwarded me. 'Hi mom, this is your son, I lost my phone, please send 450 euros urgent, don't tell anyone.' Classic family-emergency scam."* |
-|  |  | Indigo transcript card appears, then rose ring `11/100` | *"deBunq transcribes locally — the audio never leaves my phone — then Claude scores it. Eleven out of a hundred. Blocked."* |
-|  |  | Scroll to red-flag list | *"Family impersonation. Urgency. Secrecy request. No payment reference. Five concrete reasons, not just a flag."* |
-|  |  | Pan to the bottom — bunq pay button greyed out | *"And the bunq API call? It doesn't even leave the server. The block is real."* |
-| **D. Scenario 2 — phishing email** | 1:05–1:35 | Hit clear, paste the fake KPN email, tap analyse | *"Same engine on a phishing email. Spoofed sender, two-hour ultimatum, bit-ly link, brand new IBAN."* |
-|  |  | Rose ring `13/100` + four sub-score bars all red | *"Thirteen. Blocked again. Notice the four sub-scores: issuer authenticity bottoms out, urgency pressure bottoms out. The score isn't a vibe — it's math."* |
-| **E. Scenario 3 — legit invoice** | 1:35–2:25 | Hit clear, tap **Snap a bill** → take photo of a real AON invoice on a second screen | *"Now the moment that matters. Same app, real invoice. I take a photo of my actual AON Student Insurance bill."* |
-|  |  | Green ring `96/100` with five ✓ green ticks | *"Ninety-six out of a hundred. Safe. Five green ticks — known issuer, valid IBAN format, complete payment details, no urgency, normal corporate boilerplate."* |
-|  |  | Scroll to the **blue bunq pre-flight card** | *"Here's the bunq pre-flight. It shows the exact endpoint deBunq is about to hit — `POST /v1/user/.../monetary-account/.../payment`. Sandbox badge, real API. Nothing mocked."* |
-|  |  | Tap **Pay from Joint** | *"I tap pay."* |
-|  |  | Green receipt card with bunq id | *"And there's the bunq receipt. Real bunq id three-eight-three-seven-four-nine-two. From my Joint account. Reference preserved. TrustScore reminder. The whole loop closed."* |
-| **F. Stack flash** | 2:25–2:45 | Brief montage: terminal showing `uvicorn` log, `boto3` invoking Bedrock, bunq response JSON | *"Under the hood — Claude Sonnet 4.5 on AWS Bedrock. Audio via faster-whisper running locally. bunq calls RSA-signed against the public sandbox API. IBAN mod-97 checked before any call leaves the box. All live."* |
-| **G. Close** | 2:45–3:00 | Title card again with a QR code to the live demo URL (or just the title) | *"deBunq. The scam shield, built into the bank where the money lives. Built solo for bunq Hackathon 7.0."* |
+| Block                                  |      Time | Visual                                                  | Voiceover                                                                                                                                                                                                                                                                             |
+| -------------------------------------- | --------: | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. Hook**                            | 0:00–0:15 | Title card → deBunq logo or inbox screen                | “We all receive payment requests in different places. An invoice by email. A PDF from insurance. A screenshot from someone. Or even a voice note asking for money urgently. Some are real. Some are scams. The problem is that once you press pay, the damage is often already done.” |
+| **B. Problem**                         | 0:15–0:30 | Show fake email or suspicious message                   | “A normal spam filter only asks one question: should this message be in your inbox? deBunq asks a more important question: should this request be allowed to become a bank payment?”                                                                                                  |
+| **C. Setup**                           | 0:30–0:45 | Cut to deBunq inbox screen                              | “Meet deBunq. It debunks every payment request before you pay. You can paste an email, upload a PDF, take a picture of a bill, or upload a suspicious voice note. Then deBunq gives it a TrustScore before bunq prepares any action.”                                                 |
+| **D. Scenario 1 — phishing email**     | 0:45–1:20 | Paste fake phishing email → tap analyze                 | “Let’s start with a phishing email. It looks like a normal company message. But it has urgency, a suspicious link, and payment details that should make us pause.”                                                                                                                    |
+|                                        |           | TrustScore appears with low score                       | “deBunq scores it low. The result is not just ‘scam’ or ‘not scam’. It explains why. The issuer looks suspicious. The urgency is high. The payment details do not feel trustworthy.”                                                                                                  |
+|                                        |           | Scroll to blocked action                                | “Because the TrustScore is too low, deBunq blocks the bunq action. This is the important part. The protection is not only visual. The backend refuses the payment flow.”                                                                                                              |
+| **E. Scenario 2 — voice scam**         | 1:20–1:55 | Upload voice note → tap analyze                         | “Now we test a different kind of scam. A voice note says something like: ‘Hi mom, I lost my phone. Please send money urgently. Don’t tell anyone.’ This is not a normal invoice. But it is still a payment request.”                                                                  |
+|                                        |           | Transcript and low TrustScore                           | “deBunq turns the voice note into text and checks the risk. It detects family impersonation, urgency, secrecy, and missing payment context.”                                                                                                                                          |
+|                                        |           | Blocked result                                          | “Again, the request is blocked before it can become a bunq payment. This is why multimodal input matters. Scams do not only arrive as emails.”                                                                                                                                        |
+| **F. Scenario 3 — legitimate invoice** | 1:55–2:35 | Take photo or upload real invoice                       | “Now let’s use a real invoice. This is the convenience side of deBunq. Normally I would have to copy the amount, IBAN, beneficiary, reference, and due date by hand. That is slow and easy to get wrong.”                                                                             |
+|                                        |           | Green TrustScore                                        | “Here, deBunq gives it a high TrustScore. The issuer looks consistent. The IBAN format is valid. The payment details are complete. There is no suspicious urgency.”                                                                                                                   |
+|                                        |           | Show bunq pre-flight card                               | “Then deBunq prepares the bunq pre-flight. I can see the account, the beneficiary, the amount, the reference, and the scheduled date before anything happens.”                                                                                                                        |
+|                                        |           | Tap confirm                                             | “I confirm the action.”                                                                                                                                                                                                                                                               |
+|                                        |           | Show receipt with bunq id                               | “And now we get a bunq sandbox receipt. The payment action was created through the bunq API. The safe request goes through. The suspicious ones were blocked.”                                                                                                                        |
+| **G. Stack flash**                     | 2:35–2:50 | Quick montage: backend logs, Bedrock, bunq API response | “Under the hood, the frontend is built with Next.js, React, TypeScript, and Tailwind. The backend uses FastAPI. Claude on AWS Bedrock handles document reasoning and TrustScore analysis. The bunq sandbox API creates the real payment action.”                                      |
+| **H. Close**                           | 2:50–3:00 | Title card or final app screen                          | “deBunq is a scam shield inside the payment flow. It blocks the scam, and helps pay the real bill safely.”                                                                                                                                                                            |
 
 ---
 
-## Recording tips
+## Shorter one-take voiceover version
 
-- **One take, no editing.** Practice it three times silent first to nail the clicks. Then record once with voice.
-- **Phone mirrored to your laptop** if possible (QuickTime on macOS, scrcpy on Linux). Means you can record screen + voice cleanly, no tripod-shake.
-- **Voiceover in a quiet room.** A 30-euro USB mic beats your laptop mic by miles, but even built-in is fine if you're not in a café.
-- **Don't say "as you can see" or "right now we're".** Replace with present-tense action verbs: *"I tap…", "deBunq returns…", "Notice…"*.
-- **Sandbox top-up first.** Before recording, run `curl -X POST http://localhost:8000/bunq/sandbox-topup?amount=200` so the source account has money.
-- **Fresh references for the AON scenario.** bunq deduplicates by reference; if you've already paid `497186-04699219`, change to `497186-04699219-VID1`.
-- **Have all three demo inputs in a notes file** that you can paste from instantly:
-  1. The fake KPN phishing text (in `demo-assets/`).
-  2. A pre-recorded `hi-mom.m4a` voice note.
-  3. A real AON / TU/e photo on a second device or in your Photos.
+Use this if you want to record without reading a table.
 
----
+“Payment scams do not always look like scams anymore.
 
-## Backup script if a scenario breaks live
+They can look like a real invoice. They can arrive as a PDF. They can be a screenshot. They can even be a voice note from someone pretending to need money urgently.
 
-If the voice scam analysis hangs or Bedrock errors:
+A normal spam filter protects the inbox. deBunq protects the payment flow.
 
-> *"Network blip — let me cut to the next scenario. The scam scenarios are deterministic; here's the receipt from when I ran this an hour ago."*
+Here is the app. I can paste an email, upload a PDF, take a picture of a bill, or upload a suspicious voice note.
 
-Then show a screenshot of a successful prior run as proof, and continue. Judges will *not* hold a temporary backend hiccup against you if you keep the narrative moving. They *will* hold it against you if you panic.
+First, I paste a phishing email. It looks like a normal company message, but it creates urgency and asks for payment details that should make us pause.
 
----
+deBunq analyzes it and gives it a low TrustScore. It explains why. The issuer is suspicious. The urgency is high. The payment details are risky.
 
-## After recording
+Because the score is too low, the bunq action is blocked. This is not only hidden in the UI. The backend refuses the payment flow.
 
-1. Trim head/tail silence with QuickTime / Kdenlive / DaVinci Resolve (free).
-2. Export at 1080p, MP4, ≤ 200 MB.
-3. Upload to **YouTube as Unlisted**. Copy the link.
-4. Paste the link in the Devpost submission's "Demo video" field.
-5. Done.
+Now we try a voice scam. This is the classic message: ‘Hi mom, I lost my phone. Please send money urgently. Don’t tell anyone.’
+
+deBunq transcribes the voice note and checks it like a payment request. It detects family impersonation, urgency, secrecy, and missing payment context.
+
+Again, the TrustScore is low, and bunq is blocked.
+
+Now we test a real invoice. This is the convenience side of deBunq.
+
+Normally I would have to copy the amount, IBAN, beneficiary, reference, and due date by hand. That is slow and easy to get wrong.
+
+Here, I just upload the invoice. deBunq gives it a high TrustScore. The issuer looks consistent. The payment details are complete. There is no suspicious urgency.
+
+Then deBunq prepares the bunq pre-flight. I can review the account, beneficiary, amount, reference, and scheduled date.
+
+I confirm the action.
+
+Now we get a real bunq sandbox receipt. The safe request goes through. The suspicious requests were blocked.
+
+That is deBunq. It debunks every payment request before you pay.”
