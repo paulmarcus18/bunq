@@ -3,16 +3,38 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+}
+
+html {
+  background: #050505;
 }
 
 body {
-  @apply bg-slate-100 text-slate-950 antialiased;
+  @apply bg-[#050505] text-white antialiased;
+  min-height: 100vh;
   background-image:
-    radial-gradient(circle at top, rgba(31, 124, 255, 0.18), transparent 28%),
-    linear-gradient(180deg, #eff6ff 0%, #f8fafc 18%, #f8fafc 100%);
+    radial-gradient(circle at top left, rgba(255, 122, 0, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(176, 0, 255, 0.16), transparent 28%),
+    radial-gradient(circle at bottom, rgba(0, 122, 255, 0.14), transparent 32%),
+    linear-gradient(180deg, #050505 0%, #090909 45%, #050505 100%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(255, 122, 0, 0.35);
+  color: white;
 }
