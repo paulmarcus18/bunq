@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentType(str, Enum):
@@ -32,6 +32,8 @@ class AnalysisResponse(BaseModel):
     payment_description: Optional[str] = None
     manual_payment_required: bool = False
     auto_debit_detected: bool = False
+    is_suspicious: bool = False
+    phishing_signals: list[str] = Field(default_factory=list)
     recommended_action: RecommendedAction = RecommendedAction.review_manually
     summary: str = "Document analyzed."
     action_required: bool = False
@@ -39,6 +41,7 @@ class AnalysisResponse(BaseModel):
 
 class ConfirmActionRequest(BaseModel):
     analysis: AnalysisResponse
+    source_account_id: Optional[str] = None
 
 
 class PreparedAction(BaseModel):

@@ -1,0 +1,17 @@
+Subject: Final payment notice for NorthNet Mobile
+From: billing@northnet-secure-payments.com
+Reply-To: urgent-settlement@outlook.com
+
+Dear customer,
+
+Our finance team has migrated to a new settlement partner due to a compliance review.
+Please pay the outstanding EUR 189.40 immediately to avoid service interruption today.
+Use the updated bank details below and complete the transfer within 2 hours.
+
+Claimed issuer: NorthNet Mobile
+Beneficiary: Atlas Payment Services OU
+Destination IBAN: LT11 REVU 0099 3144 8801
+Payment link: bit.ly/northnet-fast-settlement
+
+Important: previous invoice bank details should be ignored because this is a temporary account.
+No transfer reference is provided in this notice.

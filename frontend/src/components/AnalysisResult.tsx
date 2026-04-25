@@ -17,13 +17,10 @@ function labelize(value: string) {
 
 export function AnalysisResult({
   analysis,
-  onChange,
 }: {
   analysis: AnalysisResponse;
-  onChange?: (patch: Partial<AnalysisResponse>) => void;
 }) {
-  const scheduleDisabled = analysis.auto_debit_detected || !analysis.due_date;
-  const payNowDisabled = analysis.auto_debit_detected;
+  const suspiciousBlocked = analysis.is_suspicious;
   const details = [
     { label: "Issuer", value: analysis.issuer_name ?? "Unknown" },
     { label: "Beneficiary", value: analysis.beneficiary_name ?? analysis.issuer_name ?? "Unknown" },
@@ -51,8 +48,14 @@ export function AnalysisResult({
             {labelize(analysis.document_type)}
           </h3>
         </div>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-          {analysis.action_required ? "Action ready" : "Review needed"}
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
+            suspiciousBlocked
+              ? "border border-rose-200 bg-rose-50 text-rose-700"
+              : "border border-slate-200 bg-slate-50 text-slate-600"
+          }`}
+        >
+          {suspiciousBlocked ? "Blocked" : analysis.action_required ? "Action ready" : "Review needed"}
         </span>
       </div>
 
@@ -93,81 +96,23 @@ export function AnalysisResult({
         })}
       </div>
 
-      <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
-        <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Recommended action</p>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={payNowDisabled}
-            onClick={() =>
-              onChange?.({
-                recommended_action: "pay_now",
-              })
-            }
-            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-              analysis.recommended_action === "pay_now"
-                ? "bg-slate-950 text-white"
-                : "border border-slate-200 bg-slate-50 text-slate-700"
-            } ${payNowDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-          >
-            Pay now
-          </button>
-          <button
-            type="button"
-            disabled={scheduleDisabled}
-            onClick={() =>
-              onChange?.({
-                recommended_action: "schedule_payment",
-              })
-            }
-            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-              analysis.recommended_action === "schedule_payment"
-                ? "bg-slate-950 text-white"
-                : "border border-slate-200 bg-slate-50 text-slate-700"
-            } ${scheduleDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-          >
-            Schedule
-          </button>
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Chosen date</p>
-              <p className="mt-1 text-sm text-slate-700">
-                {analysis.due_date ?? "No due date detected yet"}
-              </p>
-            </div>
-            <input
-              type="date"
-              value={analysis.due_date ?? ""}
-              onChange={(event) => onChange?.({ due_date: event.target.value || null })}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-            />
-          </div>
-          {analysis.recommended_action === "schedule_payment" ? (
-            <p className="mt-3 text-sm text-slate-600">
-              FinPilot will create a bunq scheduled payment before this due date.
-            </p>
+      {suspiciousBlocked ? (
+        <div className="mt-5 rounded-3xl border border-rose-200 bg-rose-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-rose-700">
+            Potential phishing detected
+          </p>
+          <p className="mt-2 text-sm text-rose-800">
+            FinPilot spotted warning signs and is blocking bunq payment creation for this request.
+          </p>
+          {analysis.phishing_signals.length ? (
+            <ul className="mt-3 space-y-2 text-sm text-rose-800">
+              {analysis.phishing_signals.map((signal) => (
+                <li key={signal}>• {signal}</li>
+              ))}
+            </ul>
           ) : null}
         </div>
-
-        {analysis.auto_debit_detected ? (
-          <p className="mt-3 text-sm font-medium text-emerald-700">
-            Automatic debit detected. FinPilot is avoiding a duplicate manual payment.
-          </p>
-        ) : null}
-        {!analysis.auto_debit_detected && !analysis.due_date ? (
-          <p className="mt-3 text-sm font-medium text-amber-700">
-            Add a due date to enable the schedule option.
-          </p>
-        ) : null}
-        {!analysis.auto_debit_detected && analysis.manual_payment_required ? (
-          <p className="mt-3 text-sm font-medium text-slate-700">
-            Manual payment is required before a bunq action can be created.
-          </p>
-        ) : null}
-      </div>
+      ) : null}
     </section>
   );
 }

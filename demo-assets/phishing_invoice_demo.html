@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Phishing Invoice Demo</title>
+    <style>
+      body {
+        margin: 0;
+        background: #eef3f8;
+        font-family: Arial, sans-serif;
+        color: #142033;
+      }
+      .mail {
+        width: 960px;
+        margin: 28px auto;
+        background: white;
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
+      }
+      .top {
+        background: linear-gradient(135deg, #0f172a, #1d4ed8);
+        color: white;
+        padding: 28px 34px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 7px 12px;
+        border-radius: 999px;
+        background: rgba(254, 226, 226, 0.2);
+        color: #fecaca;
+        border: 1px solid rgba(254, 226, 226, 0.3);
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+      .top h1 {
+        margin: 14px 0 8px;
+        font-size: 34px;
+      }
+      .top p {
+        margin: 6px 0;
+        color: #dbeafe;
+      }
+      .content {
+        padding: 30px 34px 36px;
+        line-height: 1.6;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 22px;
+      }
+      .card {
+        border: 1px solid #dbe4ef;
+        background: #f8fbff;
+        border-radius: 18px;
+        padding: 16px;
+      }
+      .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #64748b;
+      }
+      .value {
+        margin-top: 8px;
+        font-size: 24px;
+        font-weight: bold;
+      }
+      .warning {
+        margin-top: 22px;
+        border: 1px solid #fecaca;
+        background: #fff1f2;
+        color: #9f1239;
+        border-radius: 18px;
+        padding: 18px 20px;
+      }
+      .small {
+        margin-top: 18px;
+        color: #64748b;
+        font-size: 13px;
+      }
+      .cta {
+        margin-top: 20px;
+        width: 300px;
+        text-align: center;
+        background: #ef4444;
+        color: white;
+        padding: 14px 18px;
+        border-radius: 16px;
+        font-weight: bold;
+      }
+      code {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 2px 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mail">
+      <div class="top">
+        <span class="pill">Suspicious invoice reminder</span>
+        <h1>Final payment notice for NorthNet Mobile</h1>
+        <p><strong>From:</strong> billing@northnet-secure-payments.com</p>
+        <p><strong>Reply-To:</strong> urgent-settlement@outlook.com</p>
+      </div>
+
+      <div class="content">
+        Dear customer,
+        <br /><br />
+        Our finance team has migrated to a new settlement partner due to a compliance review.
+        Please pay the outstanding <strong>EUR 189.40</strong> immediately to avoid service interruption
+        today. Use the updated bank details below and complete the transfer within
+        <strong>2 hours</strong>.
+
+        <div class="grid">
+          <div class="card">
+            <div class="label">Claimed issuer</div>
+            <div class="value" style="font-size:20px">NorthNet Mobile</div>
+          </div>
+          <div class="card">
+            <div class="label">Beneficiary</div>
+            <div class="value" style="font-size:20px">Atlas Payment Services OU</div>
+          </div>
+          <div class="card">
+            <div class="label">Amount</div>
+            <div class="value">EUR 189.40</div>
+          </div>
+          <div class="card">
+            <div class="label">Destination IBAN</div>
+            <div class="value" style="font-size:18px">LT11 REVU 0099 3144 8801</div>
+          </div>
+        </div>
+
+        <div class="warning">
+          Payment link: <code>bit.ly/northnet-fast-settlement</code><br />
+          Payment reference: <code>none provided</code><br />
+          Note: previous invoice bank details should be ignored because this is a temporary account.
+        </div>
+
+        <div class="cta">Pay now to avoid closure</div>
+
+        <div class="small">
+          Fictional phishing demo for FinPilot Inbox. This sample intentionally includes classic signals:
+          urgency, sender-domain mismatch, reply-to mismatch, a different beneficiary, changed bank details,
+          a shortened link, and no clear transfer reference.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

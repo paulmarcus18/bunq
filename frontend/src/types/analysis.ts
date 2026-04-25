@@ -22,9 +22,25 @@ export interface AnalysisResponse {
   payment_description: string | null;
   manual_payment_required: boolean;
   auto_debit_detected: boolean;
+  is_suspicious: boolean;
+  phishing_signals: string[];
   recommended_action: RecommendedAction;
   summary: string;
   action_required: boolean;
+}
+
+export interface BunqAccountSummary {
+  id: string;
+  description: string;
+  balance: string;
+  currency: string;
+  iban: string | null;
+}
+
+export interface BunqAccountsResponse {
+  mode: string;
+  user_id: string;
+  accounts: BunqAccountSummary[];
 }
 
 export interface ConfirmActionResponse {

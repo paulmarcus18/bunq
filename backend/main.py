@@ -69,7 +69,10 @@ async def analyze_document(
 def confirm_action(payload: ConfirmActionRequest) -> ConfirmActionResponse:
     analysis = payload.analysis
     try:
-        bunq_result = bunq_service.confirm_finpilot_action(analysis)
+        bunq_result = bunq_service.confirm_finpilot_action(
+            analysis,
+            payload.source_account_id,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     account = bunq_result.get("account", {})
@@ -81,6 +84,8 @@ def confirm_action(payload: ConfirmActionRequest) -> ConfirmActionResponse:
         message = "bunq payment created after user confirmation"
     elif bunq_result.get("bunq_action_type") == "schedule_payment":
         message = "bunq scheduled payment created after user confirmation"
+    elif bunq_result.get("status") == "blocked":
+        message = "Potential phishing detected. FinPilot blocked the bunq action and kept this request in manual review"
     elif bunq_result.get("bunq_action_type") == "manual_review":
         message = "User confirmation received. FinPilot kept this action in manual review mode"
     elif bunq_result.get("status") == "not_required":

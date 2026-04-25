@@ -242,10 +242,19 @@ class BunqService:
         session = self._create_session()
         return self._accounts_payload_for_session(session)
 
-    def _choose_account(self, accounts_payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _choose_account(
+        self,
+        accounts_payload: dict[str, Any],
+        preferred_account_id: Optional[str] = None,
+    ) -> tuple[str, dict[str, Any]]:
         accounts = accounts_payload.get("accounts", [])
         if not accounts:
             raise RuntimeError("No bunq monetary account available")
+        if preferred_account_id:
+            for account in accounts:
+                if str(account.get("id")) == str(preferred_account_id):
+                    return str(accounts_payload.get("user_id", "unknown")), account
+            raise RuntimeError("Selected bunq account is no longer available")
         return str(accounts_payload.get("user_id", "unknown")), accounts[0]
 
     def _build_description(self, analysis: AnalysisResponse) -> str:
@@ -295,7 +304,11 @@ class BunqService:
             "recurrence_size": 1,
         }
 
-    def create_payment(self, analysis: AnalysisResponse) -> dict[str, Any]:
+    def create_payment(
+        self,
+        analysis: AnalysisResponse,
+        source_account_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         if not analysis.amount or not analysis.beneficiary_iban:
             raise RuntimeError("Payment requires amount and destination IBAN")
 
@@ -309,7 +322,7 @@ class BunqService:
 
         session = self._create_session()
         accounts_payload = self._accounts_payload_for_session(session)
-        _, account = self._choose_account(accounts_payload)
+        _, account = self._choose_account(accounts_payload, source_account_id)
         payload = self._post_session(
             f"/user/{session['user_id']}/monetary-account/{account['id']}/payment",
             self._payment_body(analysis),
@@ -326,7 +339,11 @@ class BunqService:
             "user_id": session["user_id"],
         }
 
-    def create_schedule_payment(self, analysis: AnalysisResponse) -> dict[str, Any]:
+    def create_schedule_payment(
+        self,
+        analysis: AnalysisResponse,
+        source_account_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         if not analysis.amount or not analysis.beneficiary_iban or not analysis.due_date:
             raise RuntimeError("Scheduled payment requires amount, destination IBAN, and due date")
 
@@ -340,7 +357,7 @@ class BunqService:
 
         session = self._create_session()
         accounts_payload = self._accounts_payload_for_session(session)
-        _, account = self._choose_account(accounts_payload)
+        _, account = self._choose_account(accounts_payload, source_account_id)
         body = {
             "payment": self._payment_body(analysis),
             "schedule": self._schedule_payload(analysis.due_date),
@@ -362,7 +379,11 @@ class BunqService:
             "user_id": session["user_id"],
         }
 
-    def request_sandbox_money(self, amount: float = 100.0) -> dict[str, Any]:
+    def request_sandbox_money(
+        self,
+        amount: float = 100.0,
+        source_account_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         if amount <= 0:
             raise RuntimeError("Sandbox top-up amount must be greater than zero")
         if amount > 500:
@@ -379,7 +400,7 @@ class BunqService:
 
         session = self._create_session()
         accounts_payload = self._accounts_payload_for_session(session)
-        _, account = self._choose_account(accounts_payload)
+        _, account = self._choose_account(accounts_payload, source_account_id)
         body = {
             "amount_inquired": {
                 "value": f"{amount:.2f}",
@@ -410,9 +431,71 @@ class BunqService:
             "user_id": session["user_id"],
         }
 
-    def confirm_finpilot_action(self, analysis: AnalysisResponse) -> dict[str, Any]:
+    def create_bank_account(
+        self,
+        description: str,
+        country_iban: Optional[str] = None,
+    ) -> dict[str, Any]:
+        cleaned_description = description.strip()
+        if not cleaned_description:
+            raise RuntimeError("Bank account description is required")
+
+        if not self._is_configured():
+            return {
+                "mode": "mock",
+                "status": "created",
+                "account": BunqAccountSummary(
+                    id=f"mock-{uuid.uuid4()}",
+                    description=cleaned_description,
+                    balance="0",
+                    currency="EUR",
+                    iban=None,
+                ).model_dump(),
+            }
+
+        session = self._create_session()
+        body: dict[str, Any] = {
+            "currency": "EUR",
+            "description": cleaned_description,
+        }
+        if country_iban:
+            body["country_iban"] = country_iban
+
+        payload = self._post_session(
+            f"/user/{session['user_id']}/monetary-account-bank",
+            body,
+            session["token"],
+            sign_body=True,
+        )
+        account_id = str(payload.get("Response", [{}])[0].get("Id", {}).get("id", "")).strip()
+        if not account_id:
+            raise RuntimeError("bunq did not return the created account id")
+
+        accounts_payload = self._accounts_payload_for_session(session)
+        _, account = self._choose_account(accounts_payload, account_id)
+        return {
+            "mode": "live",
+            "status": "created",
+            "account": account,
+            "user_id": session["user_id"],
+        }
+
+    def confirm_finpilot_action(
+        self,
+        analysis: AnalysisResponse,
+        source_account_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         accounts_payload = self.get_accounts()
-        user_id, account = self._choose_account(accounts_payload)
+        user_id, account = self._choose_account(accounts_payload, source_account_id)
+
+        if analysis.is_suspicious:
+            return {
+                "user_id": user_id,
+                "account": account,
+                "status": "blocked",
+                "bunq_action_type": "manual_review",
+                "bunq_action_id": None,
+            }
 
         if analysis.auto_debit_detected:
             return {
@@ -448,9 +531,9 @@ class BunqService:
             and analysis.beneficiary_iban
         ):
             if analysis.recommended_action == "schedule_payment" and analysis.due_date:
-                result = self.create_schedule_payment(analysis)
+                result = self.create_schedule_payment(analysis, source_account_id)
             else:
-                result = self.create_payment(analysis)
+                result = self.create_payment(analysis, source_account_id)
             result.setdefault("user_id", user_id)
             result.setdefault("account", account)
             return result

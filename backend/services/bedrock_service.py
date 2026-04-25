@@ -38,7 +38,10 @@ Rules:
 - payment_description is a short transfer description suitable for bunq.
 - manual_payment_required is true only when the user is expected to make a manual bank payment.
 - auto_debit_detected is true only when the document says the amount will be collected automatically or already debited.
+- is_suspicious is true when the request looks like phishing, invoice fraud, spoofing, or social engineering.
+- phishing_signals must be a short list of concrete warning signs, or an empty list when none are found.
 - If auto_debit_detected is true, recommended_action must be ignore.
+- If is_suspicious is true, recommended_action must be review_manually or ignore.
 - If manual payment is required and the document includes amount and beneficiary_iban, choose pay_now or schedule_payment.
 """
 
@@ -56,6 +59,8 @@ def _mock_analysis(optional_text: Optional[str]) -> AnalysisResponse:
         payment_description=None,
         manual_payment_required=False,
         auto_debit_detected=False,
+        is_suspicious=False,
+        phishing_signals=[],
         recommended_action=RecommendedAction.review_manually,
         summary="Demo analysis generated because Bedrock was not available.",
         action_required=False,
@@ -76,6 +81,8 @@ def _error_analysis(exc: Exception) -> AnalysisResponse:
         payment_description=None,
         manual_payment_required=False,
         auto_debit_detected=False,
+        is_suspicious=False,
+        phishing_signals=[],
         recommended_action=RecommendedAction.review_manually,
         summary=f"Bedrock analysis failed: {str(exc).strip()[:180]}",
         action_required=False,
@@ -430,10 +437,106 @@ def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized["auto_debit_detected"] = _normalize_bool(
         payload.get("auto_debit_detected", payload.get("direct_debit_detected"))
     )
+    normalized["is_suspicious"] = _normalize_bool(payload.get("is_suspicious"))
+    raw_signals = payload.get("phishing_signals") or []
+    if isinstance(raw_signals, list):
+        normalized["phishing_signals"] = [str(signal).strip() for signal in raw_signals if str(signal).strip()]
+    elif raw_signals:
+        normalized["phishing_signals"] = [str(raw_signals).strip()]
+    else:
+        normalized["phishing_signals"] = []
     normalized["recommended_action"] = _normalize_recommended_action(payload.get("recommended_action"))
     normalized["summary"] = _normalize_text(payload.get("summary")) or "Document analyzed."
     normalized["action_required"] = False
     return normalized
+
+
+def _infer_phishing_signals(
+    optional_text: Optional[str],
+    issuer_name: Optional[str],
+    beneficiary_name: Optional[str],
+    beneficiary_iban: Optional[str],
+    amount: Optional[float],
+    payment_reference: Optional[str],
+) -> list[str]:
+    signals: list[str] = []
+    haystack = (optional_text or "").lower()
+
+    pressure_markers = [
+        "urgent",
+        "immediately",
+        "immediate action",
+        "final warning",
+        "today only",
+        "expires today",
+        "before midnight",
+        "within 24 hours",
+        "within 12 hours",
+        "within 2 hours",
+        "same day payment",
+        "account will be suspended",
+        "avoid legal action",
+        "pay now to avoid closure",
+        "your account will be blocked",
+        "service interruption",
+    ]
+    if any(marker in haystack for marker in pressure_markers):
+        signals.append("Pressure language pushes immediate payment.")
+
+    spoof_markers = [
+        "confirm your account",
+        "verify your payment details",
+        "security upgrade",
+        "wallet",
+        "crypto",
+        "gift card",
+        "click the secure link",
+        "login to release payment",
+        "refund available",
+        "processing fee",
+        "release payment",
+        "updated bank details",
+        "new iban",
+        "temporary account",
+        "scan the qr",
+        "bit.ly",
+        "tinyurl",
+        "shorturl",
+    ]
+    if any(marker in haystack for marker in spoof_markers):
+        signals.append("Message uses classic phishing or spoofing wording.")
+
+    email_matches = re.findall(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})", optional_text or "")
+    suspicious_domains = [domain for domain in email_matches if any(bad in domain.lower() for bad in ["gmail.com", "outlook.com", "proton.me", "yahoo.com"])]
+    if suspicious_domains and issuer_name:
+        signals.append("Sender domain looks generic for a business payment request.")
+
+    if email_matches and issuer_name:
+        issuer_tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+", issuer_name.lower())
+            if len(token) > 3 and token not in {"group", "ltd", "limited", "international", "nederland", "holding"}
+        ]
+        if issuer_tokens and not any(
+            any(token in domain.lower() for token in issuer_tokens)
+            for domain in email_matches
+        ):
+            signals.append("Sender domain does not clearly match the claimed issuer.")
+
+    if issuer_name and beneficiary_name:
+        issuer_norm = re.sub(r"[^a-z0-9]+", "", issuer_name.lower())
+        beneficiary_norm = re.sub(r"[^a-z0-9]+", "", beneficiary_name.lower())
+        if issuer_norm and beneficiary_norm and issuer_norm not in beneficiary_norm and beneficiary_norm not in issuer_norm:
+            signals.append("Beneficiary does not clearly match the issuer.")
+
+    if amount is not None and amount > 0 and beneficiary_iban and not payment_reference:
+        signals.append("Manual payment is requested without a clear payment reference.")
+
+    unique_signals: list[str] = []
+    for signal in signals:
+        if signal not in unique_signals:
+            unique_signals.append(signal)
+    return unique_signals
 
 
 def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> AnalysisResponse:
@@ -504,6 +607,20 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
     if auto_debit_detected and _is_user_account_iban(beneficiary_iban, optional_text):
         beneficiary_iban = None
 
+    phishing_signals = list(analysis.phishing_signals)
+    inferred_signals = _infer_phishing_signals(
+        optional_text,
+        issuer_name,
+        beneficiary_name,
+        beneficiary_iban,
+        analysis.amount,
+        analysis.payment_reference,
+    )
+    for signal in inferred_signals:
+        if signal not in phishing_signals:
+            phishing_signals.append(signal)
+    is_suspicious = analysis.is_suspicious or bool(phishing_signals)
+
     manual_payment_required = analysis.manual_payment_required
     if beneficiary_iban and not auto_debit_detected:
         manual_payment_required = True
@@ -511,7 +628,9 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
     recommended_action = RecommendedAction.review_manually
     action_required = False
 
-    if auto_debit_detected:
+    if is_suspicious:
+        recommended_action = RecommendedAction.review_manually
+    elif auto_debit_detected:
         recommended_action = RecommendedAction.ignore
     elif analysis.amount is not None and beneficiary_iban and manual_payment_required:
         action_required = True
@@ -527,7 +646,9 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
             recommended_action = RecommendedAction.pay_now
 
     summary = analysis.summary
-    if auto_debit_detected:
+    if is_suspicious:
+        summary = "Potential phishing detected. Review the payment request carefully before sending money."
+    elif auto_debit_detected:
         summary = "Automatic debit detected. No manual bunq payment is needed."
     elif action_required:
         if recommended_action == RecommendedAction.schedule_payment:
@@ -548,6 +669,8 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
             "due_date": due_date,
             "manual_payment_required": manual_payment_required,
             "auto_debit_detected": auto_debit_detected,
+            "is_suspicious": is_suspicious,
+            "phishing_signals": phishing_signals,
             "recommended_action": recommended_action,
             "summary": summary,
             "payment_description": payment_description,
@@ -584,7 +707,8 @@ def _build_messages(
             "text": (
                 "Return JSON only with keys: "
                 "document_type, issuer_name, beneficiary_name, beneficiary_iban, amount, currency, due_date, "
-                "payment_reference, payment_description, manual_payment_required, auto_debit_detected, recommended_action, summary."
+                "payment_reference, payment_description, manual_payment_required, auto_debit_detected, "
+                "is_suspicious, phishing_signals, recommended_action, summary."
             ),
         }
     )

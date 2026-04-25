@@ -1,6 +1,6 @@
 "use client";
 
-import { ElementType, useMemo, useState } from "react";
+import { ElementType, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -26,9 +26,15 @@ import {
   WalletCards,
 } from "lucide-react";
 import { ActionButton } from "@/components/ActionButton";
+import { ActionReviewCard } from "@/components/ActionReviewCard";
 import { AnalysisResult } from "@/components/AnalysisResult";
 import { UploadCard } from "@/components/UploadCard";
-import { AnalysisResponse, ConfirmActionResponse } from "@/types/analysis";
+import {
+  AnalysisResponse,
+  BunqAccountsResponse,
+  BunqAccountSummary,
+  ConfirmActionResponse,
+} from "@/types/analysis";
 
 const API_BASE = "/api";
 
@@ -46,7 +52,11 @@ function dismissKeyboard() {
 }
 
 function hasPositiveAmount(amount: number | null) {
-  return typeof amount === "number" && Number.isFinite(amount) && amount > 0;
+  if (typeof amount !== "number") {
+    return false;
+  }
+
+  return Number.isFinite(amount) && amount > 0;
 }
 
 function formatAmount(amount: number | null) {
@@ -71,7 +81,9 @@ function normalizeAnalysis(analysis: AnalysisResponse): AnalysisResponse {
   let recommendedAction = analysis.recommended_action;
   let actionRequired = false;
 
-  if (analysis.auto_debit_detected) {
+  if (analysis.is_suspicious) {
+    recommendedAction = "review_manually";
+  } else if (analysis.auto_debit_detected) {
     recommendedAction = "ignore";
   } else if (recommendedAction === "schedule_payment") {
     actionRequired = hasPaymentDetails && Boolean(dueDate);
@@ -95,9 +107,14 @@ export default function HomePage() {
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [confirmResult, setConfirmResult] = useState<ConfirmActionResponse | null>(null);
+  const [bunqAccounts, setBunqAccounts] = useState<BunqAccountSummary[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const detectedTotal = useMemo(() => {
     if (!analysis) {
@@ -153,8 +170,45 @@ export default function HomePage() {
     }
   }
 
+  async function loadAccounts(force = false) {
+    if (accountsLoading || (accountsLoaded && !force)) {
+      return;
+    }
+
+    setAccountsLoading(true);
+    setAccountsError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/bunq/accounts`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Could not load bunq accounts"));
+      }
+
+      const data = (await response.json()) as BunqAccountsResponse;
+      setBunqAccounts(data.accounts ?? []);
+      setSelectedAccountId((current) => {
+        if (current && (data.accounts ?? []).some((account) => account.id === current)) {
+          return current;
+        }
+        return data.accounts?.[0]?.id ?? null;
+      });
+      setAccountsLoaded(true);
+    } catch (accountsLoadError) {
+      const message =
+        accountsLoadError instanceof Error
+          ? accountsLoadError.message
+          : "Could not load bunq accounts";
+      setAccountsError(message);
+    } finally {
+      setAccountsLoading(false);
+    }
+  }
+
   async function handleConfirmAction() {
-    if (!analysis || !analysis.action_required) {
+    if (!analysis || !analysis.action_required || !selectedAccountId) {
       return;
     }
 
@@ -169,7 +223,7 @@ export default function HomePage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ analysis }),
+        body: JSON.stringify({ analysis, source_account_id: selectedAccountId }),
       });
 
       if (!response.ok) {
@@ -200,6 +254,22 @@ export default function HomePage() {
     });
   }
 
+  useEffect(() => {
+    if (!analysis || analysis.is_suspicious || analysis.auto_debit_detected) {
+      return;
+    }
+    void loadAccounts();
+  }, [analysis]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedAccount =
+    bunqAccounts.find((account) => account.id === selectedAccountId) ?? null;
+  const canConfirm = Boolean(analysis?.action_required && selectedAccountId);
+  const buttonLabel = analysis?.action_required
+    ? analysis.recommended_action === "schedule_payment"
+      ? `Schedule from ${selectedAccount?.description ?? "selected account"}`
+      : `Pay from ${selectedAccount?.description ?? "selected account"}`
+    : "Confirm and create bunq action";
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#050505] text-white">
       <div className="pointer-events-none fixed inset-0 opacity-75">
@@ -220,10 +290,17 @@ export default function HomePage() {
             successMessage={successMessage}
             confirmResult={confirmResult}
             detectedTotal={detectedTotal}
+            accountsLoading={accountsLoading}
+            accountsError={accountsError}
+            bunqAccounts={bunqAccounts}
+            selectedAccountId={selectedAccountId}
+            selectedAccount={selectedAccount}
             onFileChange={setFile}
             onTextChange={setText}
             onAnalyze={handleAnalyze}
             onAnalysisChange={handleAnalysisChange}
+            onRefreshAccounts={() => void loadAccounts(true)}
+            onSelectAccount={setSelectedAccountId}
           />
         ) : null}
         {activeScreen === "budget" ? <BudgetScreen /> : null}
@@ -243,13 +320,16 @@ export default function HomePage() {
             <div className="rounded-[1.4rem] border border-white/10 bg-black/85 px-4 py-3 text-center text-sm font-semibold text-white/65 shadow-2xl shadow-black/50 backdrop-blur-xl">
               {analysis.auto_debit_detected
                 ? "Automatic debit detected. No manual bunq payment is needed."
+                : analysis.is_suspicious
+                  ? "Potential phishing detected. bunq payment actions are disabled until you review this request manually."
                 : analysis.recommended_action === "schedule_payment" && !analysis.due_date
                   ? "Add a due date to enable scheduling."
                   : "Not enough payment details to create a bunq action yet."}
             </div>
           ) : (
             <ActionButton
-              label="Confirm and create bunq action"
+              label={buttonLabel}
+              disabled={!canConfirm || accountsLoading}
               loading={actionLoading}
               onClick={handleConfirmAction}
             />
@@ -364,10 +444,17 @@ function InboxScreen({
   successMessage,
   confirmResult,
   detectedTotal,
+  accountsLoading,
+  accountsError,
+  bunqAccounts,
+  selectedAccountId,
+  selectedAccount,
   onFileChange,
   onTextChange,
   onAnalyze,
   onAnalysisChange,
+  onRefreshAccounts,
+  onSelectAccount,
 }: {
   file: File | null;
   text: string;
@@ -377,10 +464,17 @@ function InboxScreen({
   successMessage: string | null;
   confirmResult: ConfirmActionResponse | null;
   detectedTotal: string;
+  accountsLoading: boolean;
+  accountsError: string | null;
+  bunqAccounts: BunqAccountSummary[];
+  selectedAccountId: string | null;
+  selectedAccount: BunqAccountSummary | null;
   onFileChange: (file: File | null) => void;
   onTextChange: (text: string) => void;
   onAnalyze: () => void;
   onAnalysisChange: (patch: Partial<AnalysisResponse>) => void;
+  onRefreshAccounts: () => void;
+  onSelectAccount: (accountId: string) => void;
 }) {
   return (
     <motion.div
@@ -522,9 +616,116 @@ function InboxScreen({
           </div>
 
           <div className="bg-white text-slate-950">
-            <AnalysisResult analysis={analysis} onChange={onAnalysisChange} />
+            <AnalysisResult analysis={analysis} />
           </div>
         </motion.section>
+      ) : null}
+
+      {analysis && !analysis.is_suspicious && !analysis.auto_debit_detected ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#151515] shadow-2xl shadow-black/30"
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400">
+                <WalletCards className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="font-black">Choose bunq account</h2>
+                <p className="text-sm text-white/45">Pick the account to use before confirming</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onRefreshAccounts}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-black uppercase tracking-[0.12em] text-white/70"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="space-y-3 bg-white p-4 text-slate-950">
+            {accountsLoading ? (
+              <p className="text-sm text-slate-600">Loading your bunq accounts...</p>
+            ) : null}
+
+            {!accountsLoading && bunqAccounts.length ? (
+              <div className="space-y-3">
+                {bunqAccounts.map((account) => {
+                  const isSelected = account.id === selectedAccountId;
+                  return (
+                    <button
+                      key={account.id}
+                      type="button"
+                      onClick={() => onSelectAccount(account.id)}
+                      className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
+                        isSelected
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-900"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">{account.description}</p>
+                          <p
+                            className={`mt-1 truncate text-xs ${
+                              isSelected ? "text-slate-300" : "text-slate-500"
+                            }`}
+                          >
+                            {account.iban ?? "IBAN unavailable"}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold">
+                            {account.balance} {account.currency}
+                          </p>
+                          <p
+                            className={`mt-1 text-xs ${
+                              isSelected ? "text-cyan-200" : "text-slate-500"
+                            }`}
+                          >
+                            {isSelected ? "Selected" : "Tap to use"}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {!accountsLoading && !bunqAccounts.length ? (
+              <p className="text-sm text-slate-600">No bunq accounts are available yet.</p>
+            ) : null}
+
+            {selectedAccount ? (
+              <p className="text-sm text-slate-600">
+                FinPilot will create the bunq action from{" "}
+                <span className="font-semibold text-slate-900">{selectedAccount.description}</span>
+                {selectedAccount.iban ? ` (${selectedAccount.iban})` : ""}.
+              </p>
+            ) : null}
+
+            {accountsError ? (
+              <p className="text-sm font-medium text-rose-700">{accountsError}</p>
+            ) : null}
+
+            {analysis.action_required && !selectedAccountId && !accountsLoading && !accountsError ? (
+              <p className="text-sm font-medium text-amber-700">
+                Select a bunq account before confirming the action.
+              </p>
+            ) : null}
+          </div>
+        </motion.section>
+      ) : null}
+
+      {analysis ? (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
+          <ActionReviewCard analysis={analysis} onChange={onAnalysisChange} />
+        </motion.div>
       ) : null}
 
       {error ? (
