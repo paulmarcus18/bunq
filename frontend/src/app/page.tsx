@@ -1,6 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { ElementType, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  AlertTriangle,
+  ArrowDownCircle,
+  Bell,
+  CheckCircle2,
+  ChevronRight,
+  CircleDollarSign,
+  Clock3,
+  FileText,
+  Heart,
+  Home,
+  Mail,
+  MoreHorizontal,
+  PieChart,
+  Plus,
+  ReceiptText,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Upload,
+  Wallet,
+  WalletCards,
+} from "lucide-react";
 import { ActionButton } from "@/components/ActionButton";
 import { AnalysisResult } from "@/components/AnalysisResult";
 import { UploadCard } from "@/components/UploadCard";
@@ -8,10 +32,13 @@ import { AnalysisResponse, ConfirmActionResponse } from "@/types/analysis";
 
 const API_BASE = "/api";
 
+type Screen = "home" | "inbox" | "budget" | "docs";
+
 function dismissKeyboard() {
   if (typeof document === "undefined") {
     return;
   }
+
   const active = document.activeElement;
   if (active instanceof HTMLElement) {
     active.blur();
@@ -22,11 +49,24 @@ function hasPositiveAmount(amount: number | null) {
   return typeof amount === "number" && Number.isFinite(amount) && amount > 0;
 }
 
+function formatAmount(amount: number | null) {
+  if (!hasPositiveAmount(amount)) {
+    return "€0.00";
+  }
+
+  return new Intl.NumberFormat("nl-NL", {
+    style: "currency",
+    currency: "EUR",
+  }).format(amount);
+}
+
 function normalizeAnalysis(analysis: AnalysisResponse): AnalysisResponse {
   const dueDate = analysis.due_date?.trim() || null;
   const beneficiaryIban = analysis.beneficiary_iban?.trim() || null;
   const hasPaymentDetails =
-    Boolean(beneficiaryIban) && hasPositiveAmount(analysis.amount) && analysis.manual_payment_required;
+    Boolean(beneficiaryIban) &&
+    hasPositiveAmount(analysis.amount) &&
+    analysis.manual_payment_required;
 
   let recommendedAction = analysis.recommended_action;
   let actionRequired = false;
@@ -49,6 +89,7 @@ function normalizeAnalysis(analysis: AnalysisResponse): AnalysisResponse {
 }
 
 export default function HomePage() {
+  const [activeScreen, setActiveScreen] = useState<Screen>("inbox");
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
@@ -57,6 +98,14 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [confirmResult, setConfirmResult] = useState<ConfirmActionResponse | null>(null);
+
+  const detectedTotal = useMemo(() => {
+    if (!analysis) {
+      return "€0.00";
+    }
+
+    return formatAmount(analysis.amount);
+  }, [analysis]);
 
   async function readErrorMessage(response: Response, fallback: string) {
     try {
@@ -94,6 +143,7 @@ export default function HomePage() {
 
       const data = (await response.json()) as AnalysisResponse;
       setAnalysis(normalizeAnalysis(data));
+      setActiveScreen("inbox");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error ? submissionError.message : "Unknown error";
@@ -130,8 +180,7 @@ export default function HomePage() {
       setConfirmResult(data);
       setSuccessMessage(data.message);
     } catch (confirmError) {
-      const message =
-        confirmError instanceof Error ? confirmError.message : "Unknown error";
+      const message = confirmError instanceof Error ? confirmError.message : "Unknown error";
       setError(message);
     } finally {
       setActionLoading(false);
@@ -143,6 +192,7 @@ export default function HomePage() {
       if (!current) {
         return current;
       }
+
       return normalizeAnalysis({
         ...current,
         ...patch,
@@ -151,81 +201,46 @@ export default function HomePage() {
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-md px-4 pb-28 pt-6">
-      <section className="mb-5 rounded-[32px] bg-slate-950 px-5 py-6 text-white shadow-panel">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">
-          FinPilot Inbox
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold leading-tight">
-          Your AI inbox copilot for confusing money requests
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          Upload a financial document, screenshot, or pasted email. We extract the
-          key payment details, flag scams, and prepare a safe bunq next step.
-        </p>
-      </section>
-
-      <div className="space-y-5">
-        <UploadCard
-          file={file}
-          text={text}
-          isLoading={analysisLoading}
-          onFileChange={setFile}
-          onTextChange={setText}
-          onSubmit={handleAnalyze}
-        />
-
-        {analysisLoading ? (
-          <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-panel">
-            <p className="text-sm font-medium text-slate-600">Analyzing your document...</p>
-            <div className="mt-4 space-y-3">
-              <div className="h-4 animate-pulse rounded-full bg-slate-200" />
-              <div className="h-24 animate-pulse rounded-3xl bg-slate-100" />
-              <div className="h-4 animate-pulse rounded-full bg-slate-200" />
-            </div>
-          </section>
-        ) : null}
-
-        {analysis ? <AnalysisResult analysis={analysis} onChange={handleAnalysisChange} /> : null}
-
-        {error ? (
-          <section className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            {error}
-          </section>
-        ) : null}
-
-        {successMessage ? (
-          <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-            <p className="font-semibold">{successMessage}</p>
-            {confirmResult ? (
-              <div className="mt-2 space-y-2 leading-6">
-                <p>
-                  Action: {confirmResult.prepared_action.bunq_action_type.replaceAll("_", " ")} via{" "}
-                  {confirmResult.account_used}
-                  {confirmResult.account_iban ? ` (${confirmResult.account_iban})` : ""}.
-                </p>
-                <p>
-                  Beneficiary: {confirmResult.prepared_action.beneficiary_name ?? "Unknown"}
-                  {confirmResult.prepared_action.beneficiary_iban
-                    ? ` · Destination ${confirmResult.prepared_action.beneficiary_iban}`
-                    : ""}
-                </p>
-                <p>
-                  Status: {confirmResult.prepared_action.execution_state.replaceAll("_", " ")}
-                  {confirmResult.prepared_action.bunq_action_id
-                    ? ` · bunq id ${confirmResult.prepared_action.bunq_action_id}`
-                    : ""}
-                </p>
-              </div>
-            ) : null}
-          </section>
-        ) : null}
+    <main className="min-h-screen overflow-hidden bg-[#050505] text-white">
+      <div className="pointer-events-none fixed inset-0 opacity-75">
+        <div className="absolute -left-28 top-0 h-72 w-72 rounded-full bg-orange-500/25 blur-3xl" />
+        <div className="absolute right-[-7rem] top-24 h-80 w-80 rounded-full bg-fuchsia-600/25 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-96 w-96 rounded-full bg-blue-600/20 blur-3xl" />
       </div>
 
-      {analysis ? (
-        <>
+      <section className="relative mx-auto flex min-h-screen w-full max-w-md flex-col px-5 pb-32 pt-6">
+        {activeScreen === "home" ? <BunqHomeScreen /> : null}
+        {activeScreen === "inbox" ? (
+          <InboxScreen
+            file={file}
+            text={text}
+            analysis={analysis}
+            analysisLoading={analysisLoading}
+            error={error}
+            successMessage={successMessage}
+            confirmResult={confirmResult}
+            detectedTotal={detectedTotal}
+            onFileChange={setFile}
+            onTextChange={setText}
+            onAnalyze={handleAnalyze}
+            onAnalysisChange={handleAnalysisChange}
+          />
+        ) : null}
+        {activeScreen === "budget" ? <BudgetScreen /> : null}
+        {activeScreen === "docs" ? <DocsScreen /> : null}
+      </section>
+
+      <nav className="fixed bottom-4 left-1/2 z-20 flex w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 items-center justify-around rounded-[1.75rem] border border-white/10 bg-black/80 px-4 py-3 shadow-2xl shadow-black/60 backdrop-blur-xl">
+        <NavItem icon={Home} label="Home" active={activeScreen === "home"} onClick={() => setActiveScreen("home")} />
+        <NavItem icon={Mail} label="Inbox" active={activeScreen === "inbox"} onClick={() => setActiveScreen("inbox")} />
+        <NavItem icon={PieChart} label="Budget" active={activeScreen === "budget"} onClick={() => setActiveScreen("budget")} />
+        <NavItem icon={FileText} label="Docs" active={activeScreen === "docs"} onClick={() => setActiveScreen("docs")} />
+      </nav>
+
+      {activeScreen === "inbox" && analysis ? (
+        <div className="fixed bottom-[5.9rem] left-1/2 z-30 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2">
           {!analysis.action_required ? (
-            <div className="sticky bottom-0 left-0 right-0 mt-6 border-t border-slate-200 bg-white/90 px-4 py-4 text-center text-sm text-slate-600 backdrop-blur">
+            <div className="rounded-[1.4rem] border border-white/10 bg-black/85 px-4 py-3 text-center text-sm font-semibold text-white/65 shadow-2xl shadow-black/50 backdrop-blur-xl">
               {analysis.auto_debit_detected
                 ? "Automatic debit detected. No manual bunq payment is needed."
                 : analysis.recommended_action === "schedule_payment" && !analysis.due_date
@@ -239,8 +254,558 @@ export default function HomePage() {
               onClick={handleConfirmAction}
             />
           )}
-        </>
+        </div>
       ) : null}
     </main>
+  );
+}
+
+function BunqHomeScreen() {
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+      <header className="mb-5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 overflow-hidden rounded-full bg-gradient-to-br from-orange-400 via-pink-500 to-blue-500 p-[2px]">
+            <div className="grid h-full w-full place-items-center rounded-full bg-black text-sm font-black">L</div>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/35">10:10</p>
+            <h1 className="text-4xl font-black tracking-tight">Home</h1>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button type="button" className="grid h-10 w-10 place-items-center rounded-full bg-white/10 ring-1 ring-white/10">
+            <Search className="h-5 w-5 text-white/80" />
+          </button>
+          <button type="button" className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-500 ring-2 ring-orange-500/80">
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
+        </div>
+      </header>
+
+      <section className="mb-4 rounded-[1.75rem] border border-white/10 bg-[#1a1a1a] p-4 shadow-2xl shadow-black/35">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 text-center">
+            <p className="text-xs font-medium text-white/35">Net Wealth</p>
+            <p className="mt-1 text-2xl font-black tracking-tight">€1,559.76</p>
+            <div className="mt-1 flex items-center justify-center gap-1 text-xs font-bold text-white/35">
+              <span>This Week</span>
+              <span className="text-emerald-400">▲ €241.93</span>
+            </div>
+          </div>
+          <ChevronRight className="h-5 w-5 text-white/25" />
+        </div>
+      </section>
+
+      <div className="mb-5 grid grid-cols-3 gap-2">
+        <OutlineAction icon={ArrowDownCircle} label="Pay" tone="orange" />
+        <OutlineAction icon={CircleDollarSign} label="Request" tone="blue" />
+        <OutlineAction icon={Plus} label="Add Money" tone="purple" />
+      </div>
+
+      <section className="mb-5">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <h2 className="text-sm font-black">Bank Accounts</h2>
+          <p className="text-sm font-black text-white/70">€850.52</p>
+        </div>
+
+        <div className="overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#1a1a1a] shadow-2xl shadow-black/35">
+          <BankAccountRow
+            icon={CircleDollarSign}
+            iconClass="bg-blue-600"
+            name="Personal"
+            iban="NL15 BUNQ 2100 0752 09"
+            amount="€450.00"
+          />
+          <BankAccountRow
+            icon={Heart}
+            iconClass="bg-rose-600"
+            name="Joint"
+            iban="NL16 BUNQ 2100 0653 94"
+            amount="€200.00"
+          />
+          <BankAccountRow
+            icon={Wallet}
+            iconClass="bg-purple-600"
+            name="Everyday"
+            iban=""
+            amount=""
+            badges
+          />
+          <button type="button" className="w-full border-t border-white/10 px-4 py-3 text-left text-sm font-bold text-blue-400">
+            Add an Extra Bank Account
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-3 flex items-center justify-between px-1">
+          <h2 className="text-sm font-black">Recent Transactions</h2>
+          <Search className="h-4 w-4 text-white/70" />
+        </div>
+
+        <div className="space-y-3">
+          <TransactionRow logo="Uber" title="Uber" subtitle="Card payment" amount="€ -22.12" />
+          <TransactionRow logo="AH" title="Albert Heijn" subtitle="Groceries" amount="€ -41.80" />
+          <TransactionRow logo="+" title="Payment received" subtitle="Tikkie request" amount="€ +65.00" positive />
+        </div>
+      </section>
+    </motion.div>
+  );
+}
+
+function InboxScreen({
+  file,
+  text,
+  analysis,
+  analysisLoading,
+  error,
+  successMessage,
+  confirmResult,
+  detectedTotal,
+  onFileChange,
+  onTextChange,
+  onAnalyze,
+  onAnalysisChange,
+}: {
+  file: File | null;
+  text: string;
+  analysis: AnalysisResponse | null;
+  analysisLoading: boolean;
+  error: string | null;
+  successMessage: string | null;
+  confirmResult: ConfirmActionResponse | null;
+  detectedTotal: string;
+  onFileChange: (file: File | null) => void;
+  onTextChange: (text: string) => void;
+  onAnalyze: () => void;
+  onAnalysisChange: (patch: Partial<AnalysisResponse>) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <header className="mb-5 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">deBunq</p>
+          <p className="mt-1 max-w-[14rem] text-xs font-medium leading-4 text-white/45">
+            debunk every payment request before you pay.
+          </p>
+          <h1 className="mt-2 text-4xl font-black tracking-tight">Inbox</h1>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="relative grid h-11 w-11 place-items-center rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur"
+          >
+            <Bell className="h-5 w-5" />
+            <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-orange-500" />
+          </button>
+
+          <button
+            type="button"
+            className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-orange-500 via-red-500 to-fuchsia-600 shadow-lg shadow-orange-500/25"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+      </header>
+
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45 }}
+        className="relative mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-5 shadow-2xl shadow-black/40 backdrop-blur-xl"
+      >
+        <div className="absolute right-[-3rem] top-[-3rem] h-36 w-36 rounded-full bg-gradient-to-br from-orange-500 to-fuchsia-600 opacity-30 blur-2xl" />
+
+        <div className="relative flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Smart money requests</p>
+
+            <div className="mt-2 flex items-end gap-2">
+              <h2 className="text-4xl font-black tracking-tight">{detectedTotal}</h2>
+              <span className="mb-1 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-bold text-emerald-300">
+                {analysis ? "analyzed" : "upload"}
+              </span>
+            </div>
+
+            <p className="mt-2 max-w-[15rem] text-sm leading-5 text-white/55">
+              Drop a bill, fine, invoice, or email. We extract the payment details and prepare a safe bunq next step.
+            </p>
+          </div>
+
+          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 via-red-500 to-fuchsia-600 shadow-xl shadow-orange-500/30">
+            <ReceiptText className="h-7 w-7" />
+          </div>
+        </div>
+      </motion.section>
+
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        <QuickAction icon={Upload} label="Upload" tone="from-orange-500 to-red-500" />
+        <QuickAction icon={Search} label="Extract" tone="from-blue-500 to-cyan-400" />
+        <QuickAction icon={WalletCards} label="Prepare" tone="from-fuchsia-500 to-purple-500" />
+      </div>
+
+      <section className="mb-5 rounded-[1.75rem] border border-white/10 bg-[#151515]/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-black">Scan a document</h2>
+            <p className="text-sm text-white/45">PDF, image, screenshot, or pasted text</p>
+          </div>
+
+          <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs font-black text-blue-300 ring-1 ring-blue-500/25">
+            AI Lens
+          </span>
+        </div>
+
+        <div className="rounded-[1.5rem] bg-white text-slate-950 shadow-xl shadow-black/20">
+          <UploadCard
+            file={file}
+            text={text}
+            isLoading={analysisLoading}
+            onFileChange={onFileChange}
+            onTextChange={onTextChange}
+            onSubmit={onAnalyze}
+          />
+        </div>
+      </section>
+
+      {analysisLoading ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 rounded-[1.75rem] border border-white/10 bg-white/[0.07] p-5 shadow-2xl shadow-black/30 backdrop-blur-xl"
+        >
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400">
+              <Sparkles className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-black">Analyzing your document...</p>
+              <p className="text-sm text-white/45">Finding IBAN, amount, due date, reference and risk.</p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="h-4 animate-pulse rounded-full bg-white/10" />
+            <div className="h-24 animate-pulse rounded-3xl bg-white/10" />
+            <div className="h-4 animate-pulse rounded-full bg-white/10" />
+          </div>
+        </motion.section>
+      ) : null}
+
+      {analysis ? (
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#151515] shadow-2xl shadow-black/30"
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-emerald-400 to-blue-500">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+
+              <div>
+                <h2 className="font-black">Analysis result</h2>
+                <p className="text-sm text-white/45">Review and edit before preparing a bunq action</p>
+              </div>
+            </div>
+
+            <ChevronRight className="h-5 w-5 text-white/25" />
+          </div>
+
+          <div className="bg-white text-slate-950">
+            <AnalysisResult analysis={analysis} onChange={onAnalysisChange} />
+          </div>
+        </motion.section>
+      ) : null}
+
+      {error ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 flex gap-3 rounded-[1.5rem] border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+          <div>
+            <p className="font-black">Something went wrong</p>
+            <p className="mt-1 text-red-100/80">{error}</p>
+          </div>
+        </motion.section>
+      ) : null}
+
+      {successMessage ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 rounded-[1.5rem] border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100"
+        >
+          <div className="flex gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+
+            <div>
+              <p className="font-black">{successMessage}</p>
+
+              {confirmResult ? (
+                <div className="mt-2 space-y-2 leading-6 text-emerald-100/80">
+                  <p>
+                    Action: {confirmResult.prepared_action.bunq_action_type.replaceAll("_", " ")} via {confirmResult.account_used}
+                    {confirmResult.account_iban ? ` (${confirmResult.account_iban})` : ""}.
+                  </p>
+                  <p>
+                    Beneficiary: {confirmResult.prepared_action.beneficiary_name ?? "Unknown"}
+                    {confirmResult.prepared_action.beneficiary_iban
+                      ? ` · Destination ${confirmResult.prepared_action.beneficiary_iban}`
+                      : ""}
+                  </p>
+                  <p>
+                    Status: {confirmResult.prepared_action.execution_state.replaceAll("_", " ")}
+                    {confirmResult.prepared_action.bunq_action_id
+                      ? ` · bunq id ${confirmResult.prepared_action.bunq_action_id}`
+                      : ""}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </motion.section>
+      ) : null}
+
+      <section className="rounded-[1.75rem] border border-white/10 bg-white/[0.06] p-4 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-yellow-400 to-orange-500">
+            <Clock3 className="h-5 w-5" />
+          </div>
+
+          <div className="flex-1">
+            <h4 className="font-black">Safe by default</h4>
+            <p className="text-sm text-white/50">
+              deBunq prepares the action only. You stay in control before anything reaches bunq.
+            </p>
+          </div>
+        </div>
+      </section>
+    </motion.div>
+  );
+}
+
+function BudgetScreen() {
+  return (
+    <PlaceholderScreen
+      eyebrow="Budget"
+      title="Budget"
+      amount="€1,284.20"
+      badge="72% safe"
+      description="A simple spending overview using standard demo values. Real budgeting can be connected later."
+      cards={[
+        ["Bills", "€412.40", "Due this month"],
+        ["Groceries", "€268.10", "€81.90 left"],
+        ["Transport", "€96.35", "On track"],
+      ]}
+    />
+  );
+}
+
+function DocsScreen() {
+  return (
+    <PlaceholderScreen
+      eyebrow="Documents"
+      title="Docs"
+      amount="18"
+      badge="stored"
+      description="A clean document vault for bills, fines, tax letters, and proof of payment."
+      cards={[
+        ["Parking fine", "PDF", "Uploaded today"],
+        ["Energy bill", "PDF", "Analyzed"],
+        ["Tax letter", "Image", "Needs review"],
+      ]}
+    />
+  );
+}
+
+function PlaceholderScreen({
+  eyebrow,
+  title,
+  amount,
+  badge,
+  description,
+  cards,
+}: {
+  eyebrow: string;
+  title: string;
+  amount: string;
+  badge: string;
+  description: string;
+  cards: string[][];
+}) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+      <header className="mb-5 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/40">{eyebrow}</p>
+          <h1 className="mt-1 text-4xl font-black tracking-tight">{title}</h1>
+        </div>
+        <button type="button" className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-orange-500 via-red-500 to-fuchsia-600 shadow-lg shadow-orange-500/25">
+          <Plus className="h-5 w-5" />
+        </button>
+      </header>
+
+      <section className="relative mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+        <div className="absolute right-[-3rem] top-[-3rem] h-36 w-36 rounded-full bg-gradient-to-br from-blue-500 to-fuchsia-600 opacity-30 blur-2xl" />
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Overview</p>
+        <div className="mt-2 flex items-end gap-2">
+          <h2 className="text-4xl font-black tracking-tight">{amount}</h2>
+          <span className="mb-1 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-bold text-emerald-300">{badge}</span>
+        </div>
+        <p className="mt-2 max-w-[18rem] text-sm leading-5 text-white/55">{description}</p>
+      </section>
+
+      <div className="space-y-3">
+        {cards.map(([name, value, subtitle]) => (
+          <div key={name} className="flex items-center justify-between rounded-[1.5rem] border border-white/10 bg-[#151515] p-4 shadow-xl shadow-black/20">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 to-fuchsia-600">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-black">{name}</h3>
+                <p className="text-sm text-white/45">{subtitle}</p>
+              </div>
+            </div>
+            <p className="font-black">{value}</p>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function QuickAction({ icon: Icon, label, tone }: { icon: ElementType; label: string; tone: string }) {
+  return (
+    <button
+      type="button"
+      className={`flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r ${tone} text-sm font-black shadow-lg shadow-black/25 transition hover:scale-[1.02] active:scale-[0.98]`}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
+  );
+}
+
+function OutlineAction({ icon: Icon, label, tone }: { icon: ElementType; label: string; tone: "orange" | "blue" | "purple" }) {
+  const styles = {
+    orange: "border-orange-500 text-orange-300 shadow-orange-500/15",
+    blue: "border-blue-500 text-blue-300 shadow-blue-500/15",
+    purple: "border-fuchsia-500 text-fuchsia-300 shadow-fuchsia-500/15",
+  };
+
+  return (
+    <button
+      type="button"
+      className={`flex h-12 items-center justify-center gap-2 rounded-2xl border-2 bg-black/20 text-xs font-black shadow-lg ${styles[tone]}`}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
+  );
+}
+
+function BankAccountRow({
+  icon: Icon,
+  iconClass,
+  name,
+  iban,
+  amount,
+  badges = false,
+}: {
+  icon: ElementType;
+  iconClass: string;
+  name: string;
+  iban: string;
+  amount: string;
+  badges?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3 last:border-b-0">
+      <div className={`grid h-12 w-12 place-items-center rounded-2xl ${iconClass}`}>
+        <Icon className="h-6 w-6 text-white" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-bold">{name}</p>
+        {iban ? <p className="truncate text-xs text-white/40">{iban}</p> : null}
+        {badges ? (
+          <div className="mt-1 flex gap-1">
+            <span className="grid h-5 w-5 place-items-center rounded-md bg-orange-500/20 text-xs">🍴</span>
+            <span className="grid h-5 w-5 place-items-center rounded-md bg-yellow-500/20 text-xs">👕</span>
+          </div>
+        ) : null}
+      </div>
+      {amount ? <p className="font-black">{amount}</p> : <ChevronRight className="h-5 w-5 text-white/25" />}
+    </div>
+  );
+}
+
+function TransactionRow({
+  logo,
+  title,
+  subtitle,
+  amount,
+  positive = false,
+}: {
+  logo: string;
+  title: string;
+  subtitle: string;
+  amount: string;
+  positive?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-[1.45rem] bg-[#171717] p-3 shadow-xl shadow-black/20">
+      <div className="grid h-12 w-12 place-items-center rounded-full bg-black text-xs font-black">{logo}</div>
+      <div className="flex-1">
+        <p className="font-bold">{title}</p>
+        <p className="text-xs text-white/40">{subtitle}</p>
+      </div>
+      <p className={`font-black ${positive ? "text-emerald-400" : "text-orange-400"}`}>{amount}</p>
+    </div>
+  );
+}
+
+function NavItem({
+  icon: Icon,
+  label,
+  active = false,
+  onClick,
+}: {
+  icon: ElementType;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-col items-center gap-1 text-[11px] font-bold transition ${
+        active ? "text-white" : "text-white/35 hover:text-white/70"
+      }`}
+    >
+      <span
+        className={`grid h-9 w-9 place-items-center rounded-2xl ${
+          active
+            ? "bg-gradient-to-br from-orange-500 via-red-500 to-fuchsia-600 shadow-lg shadow-orange-500/20"
+            : "bg-transparent"
+        }`}
+      >
+        <Icon className="h-5 w-5" />
+      </span>
+      {label}
+    </button>
   );
 }
