@@ -96,8 +96,6 @@ Every payment request is scored on four axes (each 0–100, higher = safer). Cla
                                  TrustScore, mode)
 ```
 
-## How this submission maps to the judging criteria
-
 | Criterion | Weight | Where you see it in the build |
 |---|---|---|
 | **Innovation & Creativity** | 25% | Voice-note scam check is brand new for banking apps. Composite four-axis trust math is more rigorous than a single LLM yes/no. Treats source-channel itself as a signal. |
