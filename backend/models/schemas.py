@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class DocumentType(str, Enum):
@@ -11,51 +11,30 @@ class DocumentType(str, Enum):
     invoice = "invoice"
     utility_bill = "utility_bill"
     tax_letter = "tax_letter"
-    subscription_change = "subscription_change"
-    refund = "refund"
-    scam_risk = "scam_risk"
-    unknown = "unknown"
-
-
-class Urgency(str, Enum):
-    low = "low"
-    medium = "medium"
-    high = "high"
-
-
-class RiskLevel(str, Enum):
-    low = "low"
-    medium = "medium"
-    high = "high"
 
 
 class RecommendedAction(str, Enum):
     pay_now = "pay_now"
     schedule_payment = "schedule_payment"
-    request_money = "request_money"
-    mark_suspicious = "mark_suspicious"
     review_manually = "review_manually"
     ignore = "ignore"
 
 
 class AnalysisResponse(BaseModel):
-    document_type: DocumentType = DocumentType.unknown
-    sender: Optional[str] = None
-    recipient_name: Optional[str] = None
-    iban: Optional[str] = None
+    document_type: DocumentType = DocumentType.invoice
+    issuer_name: Optional[str] = None
+    beneficiary_name: Optional[str] = None
+    beneficiary_iban: Optional[str] = None
     amount: Optional[float] = None
     currency: str = "EUR"
     due_date: Optional[str] = None
     payment_reference: Optional[str] = None
-    urgency: Urgency = Urgency.low
-    risk_level: RiskLevel = RiskLevel.medium
+    payment_description: Optional[str] = None
+    manual_payment_required: bool = False
+    auto_debit_detected: bool = False
     recommended_action: RecommendedAction = RecommendedAction.review_manually
     summary: str = "Document analyzed."
-    reasoning: str = "Not enough data to recommend a fully automated action."
-    confidence: float = Field(default=0.2, ge=0.0, le=1.0)
     action_required: bool = False
-    direct_debit_detected: bool = False
-    decision_reasons: list[str] = Field(default_factory=list)
 
 
 class ConfirmActionRequest(BaseModel):
@@ -69,8 +48,8 @@ class PreparedAction(BaseModel):
     bunq_action_id: Optional[str] = None
     amount: Optional[float]
     currency: str
-    recipient: Optional[str]
-    iban: Optional[str]
+    beneficiary_name: Optional[str]
+    beneficiary_iban: Optional[str]
     due_date: Optional[str]
     reference: Optional[str]
     description: Optional[str] = None

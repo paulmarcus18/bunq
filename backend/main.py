@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import io
-import os
-from contextlib import asynccontextmanager
-from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PyPDF2 import PdfReader
 
-from db.database import AnalysisHistoryStore
 from models.schemas import AnalysisResponse, ConfirmActionRequest, ConfirmActionResponse, PreparedAction
 from services.bedrock_service import analyze_document_with_claude
 from services.bunq_service import BunqService
@@ -19,19 +15,10 @@ from services.bunq_service import BunqService
 load_dotenv()
 
 
-history_store: Optional[AnalysisHistoryStore] = None
 bunq_service = BunqService()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    global history_store
-    sqlite_path = os.getenv("SQLITE_PATH", "backend/db/finpilot.db")
-    history_store = AnalysisHistoryStore(sqlite_path)
-    yield
-
-
-app = FastAPI(title="FinPilot Inbox API", lifespan=lifespan)
+app = FastAPI(title="FinPilot Inbox API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,25 +62,25 @@ async def analyze_document(
 
     analysis = analyze_document_with_claude(file_bytes, content_type, extra_text)
 
-    if history_store is not None:
-        history_store.save_analysis(analysis)
-
     return analysis
 
 
 @app.post("/confirm-action", response_model=ConfirmActionResponse)
 def confirm_action(payload: ConfirmActionRequest) -> ConfirmActionResponse:
     analysis = payload.analysis
-    bunq_result = bunq_service.confirm_finpilot_action(analysis)
+    try:
+        bunq_result = bunq_service.confirm_finpilot_action(analysis)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     account = bunq_result.get("account", {})
     account_used = account.get("description", "No account available")
     user_id = str(bunq_result.get("user_id", "unknown"))
 
     message = "Prepared payment action for review"
-    if bunq_result.get("bunq_action_type") == "draft_payment":
-        message = "Draft bunq payment created and is awaiting user approval"
-    elif bunq_result.get("bunq_action_type") == "request_inquiry":
-        message = "bunq payment request created after user confirmation"
+    if bunq_result.get("bunq_action_type") == "payment":
+        message = "bunq payment created after user confirmation"
+    elif bunq_result.get("bunq_action_type") == "schedule_payment":
+        message = "bunq scheduled payment created after user confirmation"
     elif bunq_result.get("bunq_action_type") == "manual_review":
         message = "User confirmation received. FinPilot kept this action in manual review mode"
     elif bunq_result.get("status") == "not_required":
@@ -112,11 +99,11 @@ def confirm_action(payload: ConfirmActionRequest) -> ConfirmActionResponse:
             bunq_action_id=bunq_result.get("bunq_action_id"),
             amount=analysis.amount,
             currency=analysis.currency,
-            recipient=analysis.recipient_name,
-            iban=analysis.iban,
+            beneficiary_name=analysis.beneficiary_name,
+            beneficiary_iban=analysis.beneficiary_iban,
             due_date=analysis.due_date,
             reference=analysis.payment_reference,
-            description=analysis.summary,
+            description=analysis.payment_description or analysis.summary,
         ),
     )
 
@@ -129,3 +116,11 @@ def bunq_auth_test():
 @app.get("/bunq/accounts")
 def bunq_accounts():
     return bunq_service.get_accounts()
+
+
+@app.post("/bunq/sandbox-topup")
+def bunq_sandbox_topup(amount: float = 100.0):
+    try:
+        return bunq_service.request_sandbox_money(amount)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

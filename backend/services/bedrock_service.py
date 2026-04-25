@@ -5,85 +5,75 @@ import json
 import logging
 import os
 import re
+from datetime import date
 from typing import Any, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from models.schemas import AnalysisResponse, DocumentType, RecommendedAction, RiskLevel, Urgency
+from models.schemas import AnalysisResponse, DocumentType, RecommendedAction
 
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are a financial document triage assistant for a banking app.
-Analyze the provided financial document/email screenshot/photo.
-Extract all payment/action details.
-Classify document type.
-Detect scam risk.
-Recommend the safest action.
+SYSTEM_PROMPT = """You are a financial document parser for a banking app.
+Analyze the provided document, screenshot, or photo and extract only the fields needed to create a bunq payment or bunq scheduled payment.
 Return valid JSON only.
-Never invent IBAN or amount. If uncertain, use null and lower confidence.
-Infer the correct currency from the document if visible. Do not default to EUR when another currency is shown.
-recipient_name must be the party the user would pay or request money from, not the customer name written on the document.
-iban must be the destination payment IBAN only. Never return the user's own account number as the destination IBAN.
-If the document says the amount will be debited automatically or by direct debit, mention that in the reasoning and avoid recommending pay_now.
-For suspicious documents, recommend mark_suspicious or review_manually.
-Do not recommend immediate payment if risk is high."""
+
+Rules:
+- document_type must be exactly one of: fine, invoice, utility_bill, tax_letter.
+- Never return unknown. If the category is not obvious, choose the closest of those four.
+- Never invent IBAN, amount, due date, or payment reference.
+- If uncertain, return null.
+- issuer_name is who issued the document.
+- beneficiary_name is who should receive money from the user.
+- beneficiary_iban is the destination payment IBAN only.
+- payment_reference is the transfer reference / kenmerk / invoice number that should accompany the payment.
+- payment_description is a short transfer description suitable for bunq.
+- manual_payment_required is true only when the user is expected to make a manual bank payment.
+- auto_debit_detected is true only when the document says the amount will be collected automatically or already debited.
+- If auto_debit_detected is true, recommended_action must be ignore.
+- If manual payment is required and the document includes amount and beneficiary_iban, choose pay_now or schedule_payment.
+"""
 
 
 def _mock_analysis(optional_text: Optional[str]) -> AnalysisResponse:
-    text = (optional_text or "").lower()
-    risk = RiskLevel.high if any(word in text for word in ["urgent", "crypto", "gift card", "verify now"]) else RiskLevel.medium
-    action = RecommendedAction.mark_suspicious if risk == RiskLevel.high else RecommendedAction.review_manually
-    document_type = DocumentType.scam_risk if risk == RiskLevel.high else DocumentType.unknown
-    urgency = Urgency.high if "today" in text or "immediately" in text else Urgency.medium
-
     return AnalysisResponse(
-        document_type=document_type,
-        sender="Demo sender" if optional_text else None,
-        recipient_name=None,
-        iban=None,
+        document_type=DocumentType.invoice,
+        issuer_name="Demo issuer" if optional_text else None,
+        beneficiary_name=None,
+        beneficiary_iban=None,
         amount=None,
         currency="EUR",
         due_date=None,
         payment_reference=None,
-        urgency=urgency,
-        risk_level=risk,
-        recommended_action=action,
-        summary="Demo analysis generated because Bedrock credentials or supported file content were unavailable.",
-        reasoning="This fallback keeps the MVP usable locally while still favoring manual review for uncertain requests.",
-        confidence=0.34,
+        payment_description=None,
+        manual_payment_required=False,
+        auto_debit_detected=False,
+        recommended_action=RecommendedAction.review_manually,
+        summary="Demo analysis generated because Bedrock was not available.",
         action_required=False,
-        direct_debit_detected=False,
-        decision_reasons=["Demo mode is active, so the result should be reviewed manually."],
     )
 
 
-def _error_analysis(optional_text: Optional[str], exc: Exception) -> AnalysisResponse:
+def _error_analysis(exc: Exception) -> AnalysisResponse:
     logger.exception("Bedrock analysis failed")
-    text = (optional_text or "").lower()
-    urgency = Urgency.high if "today" in text or "immediately" in text else Urgency.medium
-    message = str(exc).strip() or exc.__class__.__name__
-
     return AnalysisResponse(
-        document_type=DocumentType.unknown,
-        sender=None,
-        recipient_name=None,
-        iban=None,
+        document_type=DocumentType.invoice,
+        issuer_name=None,
+        beneficiary_name=None,
+        beneficiary_iban=None,
         amount=None,
         currency="EUR",
         due_date=None,
         payment_reference=None,
-        urgency=urgency,
-        risk_level=RiskLevel.medium,
+        payment_description=None,
+        manual_payment_required=False,
+        auto_debit_detected=False,
         recommended_action=RecommendedAction.review_manually,
-        summary="Bedrock analysis failed, so the document needs manual review.",
-        reasoning=f"AWS Bedrock error: {message[:180]}",
-        confidence=0.0,
+        summary=f"Bedrock analysis failed: {str(exc).strip()[:180]}",
         action_required=False,
-        direct_debit_detected=False,
-        decision_reasons=["The AI analysis failed, so no payment action should be prepared automatically."],
     )
 
 
@@ -100,53 +90,14 @@ def _normalize_choice(value: Any) -> str:
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
-def _normalize_document_type(value: Any) -> str:
-    normalized = _normalize_choice(value)
-    aliases = {
-        "payment_notice": DocumentType.fine.value,
-        "offence_notice": DocumentType.fine.value,
-        "traffic_fine": DocumentType.fine.value,
-        "speeding_ticket": DocumentType.fine.value,
-        "ticket": DocumentType.fine.value,
-        "bill": DocumentType.invoice.value,
-        "utility": DocumentType.utility_bill.value,
-        "tax": DocumentType.tax_letter.value,
-        "subscription": DocumentType.subscription_change.value,
-        "refund_notice": DocumentType.refund.value,
-        "scam": DocumentType.scam_risk.value,
-    }
-    if normalized in {item.value for item in DocumentType}:
-        return normalized
-    return aliases.get(normalized, DocumentType.unknown.value)
-
-
-def _normalize_level(value: Any, allowed: set[str], default: str) -> str:
-    normalized = _normalize_choice(value)
-    if normalized in allowed:
-        return normalized
-    titled = normalized.title()
-    if titled.lower() in allowed:
-        return titled.lower()
-    return default
-
-
-def _normalize_confidence(value: Any) -> float:
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
     if value is None:
-        return 0.0
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-    if numeric > 1:
-        if numeric <= 10:
-            return round(numeric / 10, 2)
-        if numeric <= 100:
-            return round(numeric / 100, 2)
-        return 1.0
-    if numeric < 0:
-        return 0.0
-    return round(numeric, 2)
+        return False
+    return str(value).strip().lower() in {"true", "yes", "1", "manual", "required", "detected"}
 
 
 def _normalize_amount(value: Any) -> Optional[float]:
@@ -168,85 +119,142 @@ def _normalize_amount(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(payload)
-    normalized["document_type"] = _normalize_document_type(payload.get("document_type"))
-    normalized["urgency"] = _normalize_level(
-        payload.get("urgency"),
-        {item.value for item in Urgency},
-        Urgency.medium.value,
-    )
-    normalized["risk_level"] = _normalize_level(
-        payload.get("risk_level"),
-        {item.value for item in RiskLevel},
-        RiskLevel.medium.value,
-    )
-    normalized["recommended_action"] = _normalize_choice(payload.get("recommended_action")) or RecommendedAction.review_manually.value
-    if normalized["recommended_action"] not in {item.value for item in RecommendedAction}:
-        normalized["recommended_action"] = RecommendedAction.review_manually.value
-    normalized["confidence"] = _normalize_confidence(payload.get("confidence"))
-    normalized["amount"] = _normalize_amount(payload.get("amount"))
-    currency = str(payload.get("currency") or "EUR").strip().upper()
-    normalized["currency"] = currency if len(currency) == 3 else "EUR"
-    normalized["action_required"] = bool(payload.get("action_required", False))
-    normalized["direct_debit_detected"] = bool(payload.get("direct_debit_detected", False))
-    reasons = payload.get("decision_reasons")
-    if isinstance(reasons, list):
-        normalized["decision_reasons"] = [str(reason).strip() for reason in reasons if str(reason).strip()]
-    else:
-        normalized["decision_reasons"] = []
-    return normalized
+def _normalize_document_type(value: Any) -> str:
+    normalized = _normalize_choice(value)
+    aliases = {
+        "payment_notice": DocumentType.fine.value,
+        "offence_notice": DocumentType.fine.value,
+        "offense_notice": DocumentType.fine.value,
+        "traffic_fine": DocumentType.fine.value,
+        "speeding_ticket": DocumentType.fine.value,
+        "parking_ticket": DocumentType.fine.value,
+        "penalty": DocumentType.fine.value,
+        "boete": DocumentType.fine.value,
+        "ticket": DocumentType.fine.value,
+        "invoice_reminder": DocumentType.invoice.value,
+        "payment_reminder": DocumentType.invoice.value,
+        "final_notice": DocumentType.invoice.value,
+        "reminder": DocumentType.invoice.value,
+        "insurance_letter": DocumentType.invoice.value,
+        "insurance_invoice": DocumentType.invoice.value,
+        "subscription_notice": DocumentType.invoice.value,
+        "subscription_change": DocumentType.invoice.value,
+        "bill": DocumentType.utility_bill.value,
+        "water_bill": DocumentType.utility_bill.value,
+        "energy_bill": DocumentType.utility_bill.value,
+        "phone_bill": DocumentType.utility_bill.value,
+        "mobile_bill": DocumentType.utility_bill.value,
+        "internet_bill": DocumentType.utility_bill.value,
+        "utility": DocumentType.utility_bill.value,
+        "tax": DocumentType.tax_letter.value,
+        "tax_bill": DocumentType.tax_letter.value,
+        "assessment": DocumentType.tax_letter.value,
+        "assessment_notice": DocumentType.tax_letter.value,
+        "aanslagbiljet": DocumentType.tax_letter.value,
+        "woz": DocumentType.tax_letter.value,
+    }
+    if normalized in {item.value for item in DocumentType}:
+        return normalized
+    return aliases.get(normalized, DocumentType.invoice.value)
 
 
-def _normalize_text_for_matching(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip().lower()
+def _classify_document_type(
+    current_type: DocumentType,
+    optional_text: Optional[str],
+    issuer_name: Optional[str],
+    summary: Optional[str],
+) -> DocumentType:
+    haystack = " ".join(
+        part
+        for part in [
+            current_type.value if current_type else "",
+            optional_text or "",
+            issuer_name or "",
+            summary or "",
+        ]
+        if part
+    ).lower()
 
-
-def _contains_any(text: str, patterns: list[str]) -> bool:
-    lowered = text.lower()
-    return any(pattern in lowered for pattern in patterns)
-
-
-def _detect_direct_debit(optional_text: Optional[str]) -> bool:
-    if not optional_text:
-        return False
-    patterns = [
-        "we schrijven dit bedrag",
-        "automatische incasso",
-        "automatisch af",
-        "afschrijven van je rekening",
-        "direct debit",
-        "will be debited",
-        "we will debit",
-        "collected automatically",
+    fine_markers = [
+        "fine",
+        "ticket",
+        "offence",
+        "offense",
+        "penalty",
+        "speeding",
+        "parking violation",
+        "traffic violation",
+        "boete",
     ]
-    return _contains_any(optional_text, patterns)
+    tax_markers = [
+        "tax",
+        "belasting",
+        "aanslag",
+        "aanslagbiljet",
+        "woz",
+        "assessment",
+        "heffing",
+        "rioolheffing",
+        "afvalstoffenheffing",
+        "waterschapsbelasting",
+        "belastingsamenwerking",
+        "municipal tax",
+    ]
+    utility_markers = [
+        "utility",
+        "water bill",
+        "electricity",
+        "energy",
+        "gas",
+        "internet",
+        "mobile",
+        "telecom",
+        "phone bill",
+        "kpn",
+        "vodafone",
+        "odido",
+        "ziggo",
+        "t mobile",
+        "t-mobile",
+    ]
+    invoice_markers = [
+        "invoice",
+        "factuur",
+        "reminder",
+        "final notice",
+        "payment reminder",
+        "insurance",
+        "premium",
+        "renewal",
+        "subscription",
+        "aon",
+    ]
+
+    if any(marker in haystack for marker in fine_markers):
+        return DocumentType.fine
+    if any(marker in haystack for marker in tax_markers):
+        return DocumentType.tax_letter
+    if any(marker in haystack for marker in utility_markers):
+        return DocumentType.utility_bill
+    if any(marker in haystack for marker in invoice_markers):
+        return DocumentType.invoice
+    if current_type in {DocumentType.fine, DocumentType.invoice, DocumentType.utility_bill, DocumentType.tax_letter}:
+        return current_type
+    return DocumentType.invoice
 
 
-def _looks_like_person_name(value: Optional[str]) -> bool:
-    if not value:
-        return False
-    tokens = [token for token in re.split(r"\s+", value.strip()) if token]
-    if not tokens or len(tokens) > 4:
-        return False
-    return all(any(char.isalpha() for char in token) for token in tokens)
+def _normalize_recommended_action(value: Any) -> str:
+    normalized = _normalize_choice(value)
+    if normalized in {item.value for item in RecommendedAction}:
+        return normalized
+    return RecommendedAction.review_manually.value
 
 
-def _extract_sender_from_text(optional_text: Optional[str]) -> Optional[str]:
-    if not optional_text:
+def _normalize_text(value: Any) -> Optional[str]:
+    if value is None:
         return None
-
-    patterns = [
-        r"factuur\s+([A-Z][A-Za-z0-9.&\- ]{2,40})",
-        r"invoice\s+from\s+([A-Z][A-Za-z0-9.&\- ]{2,40})",
-        r"([A-Z][A-Za-z0-9.&\- ]{2,40}\s+B\.V\.)",
-        r"([A-Z][A-Za-z0-9.&\- ]{2,40}\s+N\.V\.)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, optional_text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    return None
+    text = str(value).strip()
+    return text or None
 
 
 def _extract_company_like_name(optional_text: Optional[str]) -> Optional[str]:
@@ -282,105 +290,140 @@ def _is_user_account_iban(iban: Optional[str], optional_text: Optional[str]) -> 
     for index, line in enumerate(lines):
         normalized_line = _normalize_iban_token(line)
         if iban_token and iban_token in normalized_line:
-            window = " ".join(lines[max(0, index - 2): min(len(lines), index + 3)])
-            normalized_window = _normalize_text_for_matching(window)
-            if _contains_any(
-                normalized_window,
-                [
+            window = " ".join(lines[max(0, index - 2): min(len(lines), index + 3)]).lower()
+            if any(
+                marker in window
+                for marker in [
                     "jouw rekeningnummer",
                     "your account number",
-                    "rekeningnummer kpn",
-                    "we schrijven dit bedrag",
                     "afschrijven van je rekening",
                     "bankrekening waarmee",
                     "rekening waarvan",
-                ],
+                ]
             ):
                 return True
     return False
 
 
-def _apply_safety_rules(analysis: AnalysisResponse, optional_text: Optional[str]) -> AnalysisResponse:
-    direct_debit_detected = _detect_direct_debit(optional_text) or analysis.direct_debit_detected
-    sender_from_text = _extract_sender_from_text(optional_text)
-    company_from_text = _extract_company_like_name(optional_text)
-    reasons: list[str] = list(analysis.decision_reasons)
+def _is_generic_beneficiary(value: Optional[str]) -> bool:
+    if not value:
+        return True
 
-    recipient_name = analysis.recipient_name
-    sender = analysis.sender or sender_from_text or company_from_text
+    normalized = re.sub(r"\s+", " ", value).strip().lower()
+    generic_values = {
+        "this letter",
+        "letter",
+        "client",
+        "customer",
+        "policyholder",
+        "insured",
+        "beneficiary",
+        "you",
+        "recipient",
+        "account holder",
+    }
+    return normalized in generic_values or normalized.startswith("this ")
 
-    if (
-        analysis.document_type in {DocumentType.invoice, DocumentType.utility_bill, DocumentType.unknown}
-        and recipient_name
-        and _looks_like_person_name(recipient_name)
-        and company_from_text
-    ):
-        recipient_name = company_from_text
-        reasons.append("The document appears to request payment to a company, so the beneficiary was corrected from the customer name.")
 
-    if analysis.document_type == DocumentType.unknown and analysis.amount is not None and analysis.iban:
-        analysis = analysis.model_copy(update={"document_type": DocumentType.invoice})
-        reasons.append("The document includes a payable amount and destination IBAN, so it was treated as an invoice/reminder.")
+def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    normalized["document_type"] = _normalize_document_type(payload.get("document_type"))
+    normalized["issuer_name"] = _normalize_text(payload.get("issuer_name") or payload.get("sender"))
+    normalized["beneficiary_name"] = _normalize_text(payload.get("beneficiary_name") or payload.get("recipient_name"))
+    normalized["beneficiary_iban"] = _normalize_text(payload.get("beneficiary_iban") or payload.get("iban"))
+    normalized["amount"] = _normalize_amount(payload.get("amount"))
+    currency = str(payload.get("currency") or "EUR").strip().upper()
+    normalized["currency"] = currency if len(currency) == 3 else "EUR"
+    normalized["due_date"] = _normalize_text(payload.get("due_date"))
+    normalized["payment_reference"] = _normalize_text(payload.get("payment_reference"))
+    normalized["payment_description"] = _normalize_text(payload.get("payment_description"))
+    normalized["manual_payment_required"] = _normalize_bool(payload.get("manual_payment_required"))
+    normalized["auto_debit_detected"] = _normalize_bool(
+        payload.get("auto_debit_detected", payload.get("direct_debit_detected"))
+    )
+    normalized["recommended_action"] = _normalize_recommended_action(payload.get("recommended_action"))
+    normalized["summary"] = _normalize_text(payload.get("summary")) or "Document analyzed."
+    normalized["action_required"] = False
+    return normalized
 
-    if analysis.document_type in {DocumentType.invoice, DocumentType.utility_bill} and direct_debit_detected:
-        if analysis.iban and _is_user_account_iban(analysis.iban, optional_text):
-            analysis.iban = None
-            reasons.append("The detected IBAN appears to be the user's own account, not the payee destination.")
 
-        if recipient_name and _looks_like_person_name(recipient_name) and sender:
-            recipient_name = sender
-            reasons.append("The named person appears to be the customer, so the payee was switched to the bill issuer.")
+def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> AnalysisResponse:
+    issuer_name = analysis.issuer_name or _extract_company_like_name(optional_text)
+    beneficiary_name = analysis.beneficiary_name
+    document_type = _classify_document_type(
+        analysis.document_type,
+        optional_text,
+        issuer_name,
+        analysis.summary,
+    )
+    auto_debit_detected = analysis.auto_debit_detected or (
+        optional_text is not None
+        and any(
+            marker in optional_text.lower()
+            for marker in [
+                "automatische incasso",
+                "direct debit",
+                "we will debit",
+                "will be debited",
+                "afgeschreven",
+            ]
+        )
+    )
 
-    recommended_action = analysis.recommended_action
-    action_required = analysis.action_required
+    if _is_generic_beneficiary(beneficiary_name):
+        beneficiary_name = issuer_name or beneficiary_name
 
-    if analysis.risk_level == RiskLevel.high:
-        recommended_action = RecommendedAction.mark_suspicious
-        action_required = False
-        reasons.append("High-risk documents should not trigger a payment preparation flow.")
-    elif direct_debit_detected:
-        recommended_action = RecommendedAction.ignore if analysis.risk_level == RiskLevel.low else RecommendedAction.review_manually
-        action_required = False
-        reasons.append("The document indicates automatic collection or direct debit, so manual payment is not recommended.")
-    elif (
-        analysis.recommended_action == RecommendedAction.pay_now
-        and analysis.amount is not None
-        and analysis.iban
-        and analysis.risk_level != RiskLevel.high
-    ):
+    beneficiary_iban = analysis.beneficiary_iban
+    if auto_debit_detected and _is_user_account_iban(beneficiary_iban, optional_text):
+        beneficiary_iban = None
+
+    manual_payment_required = analysis.manual_payment_required
+    if beneficiary_iban and not auto_debit_detected:
+        manual_payment_required = True
+
+    recommended_action = RecommendedAction.review_manually
+    action_required = False
+
+    if auto_debit_detected:
+        recommended_action = RecommendedAction.ignore
+    elif analysis.amount is not None and beneficiary_iban and manual_payment_required:
+        action_required = True
         recommended_action = RecommendedAction.pay_now
-        action_required = True
-        reasons.append("The document contains a payable amount, destination IBAN, and no high-risk warning, so payment can be confirmed by the user.")
-    elif analysis.document_type == DocumentType.fine and analysis.amount is not None and analysis.risk_level != RiskLevel.high:
-        recommended_action = RecommendedAction.schedule_payment
-        action_required = True
-        reasons.append("This looks like a legitimate fine with an amount due, so scheduling a payment is the safest next step.")
-    elif analysis.document_type in {DocumentType.invoice, DocumentType.utility_bill} and analysis.amount is not None:
-        recommended_action = RecommendedAction.review_manually
-        action_required = True
-        reasons.append("This appears to be a legitimate bill, but payment details should be checked before preparing a transfer.")
-
-    if not reasons:
-        reasons.append("The recommendation is based on the extracted payment details and risk assessment.")
+        if document_type == DocumentType.invoice and analysis.due_date:
+            try:
+                due = date.fromisoformat(analysis.due_date)
+                if due > date.today():
+                    recommended_action = RecommendedAction.schedule_payment
+            except ValueError:
+                recommended_action = RecommendedAction.schedule_payment
+        elif document_type in {DocumentType.utility_bill, DocumentType.tax_letter, DocumentType.fine}:
+            recommended_action = RecommendedAction.pay_now
 
     summary = analysis.summary
-    if direct_debit_detected:
-        summary = f"{summary.rstrip('.')} Automatic debit appears to be in place."
+    if auto_debit_detected:
+        summary = "Automatic debit detected. No manual bunq payment is needed."
+    elif action_required:
+        if recommended_action == RecommendedAction.schedule_payment:
+            summary = "Invoice detected. A bunq scheduled payment can be created before the due date."
+        else:
+            summary = "Bill detected. A bunq payment can be created right away."
+    elif not beneficiary_iban or analysis.amount is None:
+        summary = "The document does not yet contain enough payment data for a bunq action."
 
-    reasoning = analysis.reasoning
-    if direct_debit_detected and "direct debit" not in reasoning.lower() and "automatic" not in reasoning.lower():
-        reasoning = f"{reasoning.rstrip('.')} The document also suggests automatic debit or direct debit."
+    payment_description = analysis.payment_description or analysis.payment_reference or summary
 
     return analysis.model_copy(
         update={
-            "sender": sender,
-            "recipient_name": recipient_name,
+            "issuer_name": issuer_name,
+            "document_type": document_type,
+            "beneficiary_name": beneficiary_name,
+            "beneficiary_iban": beneficiary_iban,
+            "manual_payment_required": manual_payment_required,
+            "auto_debit_detected": auto_debit_detected,
             "recommended_action": recommended_action,
-            "action_required": action_required,
-            "direct_debit_detected": direct_debit_detected,
-            "decision_reasons": reasons[:3],
             "summary": summary,
-            "reasoning": reasoning,
+            "payment_description": payment_description,
+            "action_required": action_required,
         }
     )
 
@@ -412,8 +455,8 @@ def _build_messages(
             "type": "text",
             "text": (
                 "Return JSON only with keys: "
-                "document_type, sender, recipient_name, iban, amount, currency, due_date, "
-                "payment_reference, urgency, risk_level, recommended_action, summary, reasoning, confidence."
+                "document_type, issuer_name, beneficiary_name, beneficiary_iban, amount, currency, due_date, "
+                "payment_reference, payment_description, manual_payment_required, auto_debit_detected, recommended_action, summary."
             ),
         }
     )
@@ -454,7 +497,7 @@ def analyze_document_with_claude(
     try:
         body = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 1200,
+            "max_tokens": 900,
             "temperature": 0,
             "system": SYSTEM_PROMPT,
             "messages": _build_messages(file_bytes, content_type, optional_text),
@@ -474,6 +517,6 @@ def analyze_document_with_claude(
         parsed = _extract_json_block(text)
         normalized = _normalize_analysis_payload(parsed)
         analysis = AnalysisResponse.model_validate(normalized)
-        return _apply_safety_rules(analysis, optional_text)
+        return _derive_action(analysis, optional_text)
     except (BotoCoreError, ClientError, ValueError, json.JSONDecodeError) as exc:
-        return _error_analysis(optional_text, exc)
+        return _error_analysis(exc)

@@ -1,5 +1,4 @@
 import { AnalysisResponse } from "@/types/analysis";
-import { RiskBadge } from "./RiskBadge";
 
 function formatCurrency(amount: number | null, currency: string) {
   if (amount === null) {
@@ -18,10 +17,19 @@ function labelize(value: string) {
 
 export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
   const details = [
-    { label: "Beneficiary", value: analysis.recipient_name ?? analysis.sender ?? "Unknown" },
-    { label: "IBAN", value: analysis.iban ?? "Not found" },
+    { label: "Issuer", value: analysis.issuer_name ?? "Unknown" },
+    { label: "Beneficiary", value: analysis.beneficiary_name ?? analysis.issuer_name ?? "Unknown" },
+    { label: "IBAN", value: analysis.beneficiary_iban ?? "Not found" },
     { label: "Reference", value: analysis.payment_reference ?? "Not found" },
     { label: "Due date", value: analysis.due_date ?? "No deadline detected" },
+    {
+      label: "Payment mode",
+      value: analysis.auto_debit_detected
+        ? "Automatic debit"
+        : analysis.manual_payment_required
+          ? "Manual transfer"
+          : "Review only",
+    },
   ];
 
   return (
@@ -35,7 +43,9 @@ export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
             {labelize(analysis.document_type)}
           </h3>
         </div>
-        <RiskBadge level={analysis.risk_level} />
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+          {analysis.action_required ? "Action ready" : "Review needed"}
+        </span>
       </div>
 
       <div className="mt-5 rounded-3xl bg-slate-950 p-5 text-white">
@@ -60,27 +70,16 @@ export function AnalysisResult({ analysis }: { analysis: AnalysisResponse }) {
         <p className="mt-2 text-lg font-semibold capitalize text-slate-950">
           {labelize(analysis.recommended_action)}
         </p>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{analysis.reasoning}</p>
-        {analysis.decision_reasons.length > 0 ? (
-          <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Why this action?</p>
-            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
-              {analysis.decision_reasons.map((reason) => (
-                <li key={reason}>• {reason}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {analysis.direct_debit_detected ? (
+        {analysis.auto_debit_detected ? (
           <p className="mt-3 text-sm font-medium text-emerald-700">
             Automatic debit detected. FinPilot is avoiding a duplicate manual payment.
           </p>
         ) : null}
-        <p className="mt-3 text-xs text-slate-500">
-          Urgency: <span className="font-semibold capitalize">{analysis.urgency}</span>
-          {" · "}
-          Confidence: <span className="font-semibold">{Math.round(analysis.confidence * 100)}%</span>
-        </p>
+        {!analysis.auto_debit_detected && analysis.manual_payment_required ? (
+          <p className="mt-3 text-sm font-medium text-slate-700">
+            Manual payment is required before a bunq action can be created.
+          </p>
+        ) : null}
       </div>
     </section>
   );

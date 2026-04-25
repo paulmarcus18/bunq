@@ -22,19 +22,41 @@ class AnalysisHistoryStore:
                 CREATE TABLE IF NOT EXISTS analysis_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     document_type TEXT,
-                    sender TEXT,
-                    recipient_name TEXT,
+                    issuer_name TEXT,
+                    beneficiary_name TEXT,
+                    beneficiary_iban TEXT,
                     amount REAL,
                     currency TEXT,
                     due_date TEXT,
-                    risk_level TEXT,
+                    payment_reference TEXT,
+                    manual_payment_required INTEGER,
+                    auto_debit_detected INTEGER,
                     recommended_action TEXT,
                     summary TEXT,
-                    confidence REAL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            self._ensure_columns(connection)
+
+    def _ensure_columns(self, connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(analysis_history)").fetchall()
+        }
+        required_columns = {
+            "issuer_name": "TEXT",
+            "beneficiary_name": "TEXT",
+            "beneficiary_iban": "TEXT",
+            "payment_reference": "TEXT",
+            "manual_payment_required": "INTEGER DEFAULT 0",
+            "auto_debit_detected": "INTEGER DEFAULT 0",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE analysis_history ADD COLUMN {column_name} {column_type}"
+                )
 
     def save_analysis(self, analysis: AnalysisResponse) -> None:
         with self._connect() as connection:
@@ -42,27 +64,31 @@ class AnalysisHistoryStore:
                 """
                 INSERT INTO analysis_history (
                     document_type,
-                    sender,
-                    recipient_name,
+                    issuer_name,
+                    beneficiary_name,
+                    beneficiary_iban,
                     amount,
                     currency,
                     due_date,
-                    risk_level,
+                    payment_reference,
+                    manual_payment_required,
+                    auto_debit_detected,
                     recommended_action,
-                    summary,
-                    confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     analysis.document_type.value,
-                    analysis.sender,
-                    analysis.recipient_name,
+                    analysis.issuer_name,
+                    analysis.beneficiary_name,
+                    analysis.beneficiary_iban,
                     analysis.amount,
                     analysis.currency,
                     analysis.due_date,
-                    analysis.risk_level.value,
+                    analysis.payment_reference,
+                    int(analysis.manual_payment_required),
+                    int(analysis.auto_debit_detected),
                     analysis.recommended_action.value,
                     analysis.summary,
-                    analysis.confidence,
                 ),
             )

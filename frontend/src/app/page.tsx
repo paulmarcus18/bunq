@@ -18,6 +18,15 @@ export default function HomePage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [confirmResult, setConfirmResult] = useState<ConfirmActionResponse | null>(null);
 
+  async function readErrorMessage(response: Response, fallback: string) {
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      return payload.detail ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   async function handleAnalyze() {
     setAnalysisLoading(true);
     setError(null);
@@ -39,7 +48,7 @@ export default function HomePage() {
       });
 
       if (!response.ok) {
-        throw new Error("Analysis failed");
+        throw new Error(await readErrorMessage(response, "Analysis failed"));
       }
 
       const data = (await response.json()) as AnalysisResponse;
@@ -72,7 +81,7 @@ export default function HomePage() {
       });
 
       if (!response.ok) {
-        throw new Error("Could not prepare bunq action");
+        throw new Error(await readErrorMessage(response, "Could not prepare bunq action"));
       }
 
       const data = (await response.json()) as ConfirmActionResponse;
@@ -142,9 +151,9 @@ export default function HomePage() {
                   {confirmResult.account_iban ? ` (${confirmResult.account_iban})` : ""}.
                 </p>
                 <p>
-                  Beneficiary: {confirmResult.prepared_action.recipient ?? "Unknown"}
-                  {confirmResult.prepared_action.iban
-                    ? ` · Destination ${confirmResult.prepared_action.iban}`
+                  Beneficiary: {confirmResult.prepared_action.beneficiary_name ?? "Unknown"}
+                  {confirmResult.prepared_action.beneficiary_iban
+                    ? ` · Destination ${confirmResult.prepared_action.beneficiary_iban}`
                     : ""}
                 </p>
                 <p>
@@ -163,7 +172,9 @@ export default function HomePage() {
         <>
           {!analysis.action_required ? (
             <div className="sticky bottom-0 left-0 right-0 mt-6 border-t border-slate-200 bg-white/90 px-4 py-4 text-center text-sm text-slate-600 backdrop-blur">
-              No payment prep needed right now. FinPilot recommends review only.
+              {analysis.auto_debit_detected
+                ? "Automatic debit detected. No manual bunq payment is needed."
+                : "Not enough payment details to create a bunq action yet."}
             </div>
           ) : (
             <ActionButton
