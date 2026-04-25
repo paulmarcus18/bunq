@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef } from "react";
+
 interface UploadCardProps {
   file: File | null;
   text: string;
@@ -17,6 +19,9 @@ export function UploadCard({
   onTextChange,
   onSubmit,
 }: UploadCardProps) {
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <section className="rounded-[28px] border border-white/80 bg-white p-5 shadow-panel">
       <div className="mb-4">
@@ -32,23 +37,49 @@ export function UploadCard({
         </p>
       </div>
 
-      <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
-        <input
-          type="file"
-          className="hidden"
-          accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
-          onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
-        />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        className="hidden"
+        accept="image/*"
+        capture="environment"
+        onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
+        onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+      />
+
+      <div className="flex min-h-36 flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
         <span className="rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-900">
-          {file ? "Document attached" : "Tap to upload"}
+          {file ? "Document attached" : "Phone ready"}
         </span>
         <span className="mt-3 text-sm font-medium text-slate-700">
-          {file ? file.name : "Photo, screenshot, or PDF"}
+          {file ? file.name : "Take a photo, upload a screenshot, or choose a PDF"}
         </span>
         <span className="mt-1 text-xs text-slate-500">
-          JPG, PNG, WEBP, HEIC, PDF
+          Camera capture works on mobile. JPG, PNG, WEBP, HEIC, PDF
         </span>
-      </label>
+        <div className="mt-5 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="rounded-2xl bg-bunqBlue px-4 py-4 text-sm font-semibold text-white transition hover:bg-blue-600"
+          >
+            Use camera
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold text-slate-900 transition hover:border-slate-300"
+          >
+            Upload file
+          </button>
+        </div>
+      </div>
 
       <div className="mt-4">
         <label className="mb-2 block text-sm font-medium text-slate-700">

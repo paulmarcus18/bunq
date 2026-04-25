@@ -6,7 +6,17 @@ import { AnalysisResult } from "@/components/AnalysisResult";
 import { UploadCard } from "@/components/UploadCard";
 import { AnalysisResponse, ConfirmActionResponse } from "@/types/analysis";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+const API_BASE = "/api";
+
+function dismissKeyboard() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    active.blur();
+  }
+}
 
 function hasPositiveAmount(amount: number | null) {
   return typeof amount === "number" && Number.isFinite(amount) && amount > 0;
@@ -58,6 +68,7 @@ export default function HomePage() {
   }
 
   async function handleAnalyze() {
+    dismissKeyboard();
     setAnalysisLoading(true);
     setError(null);
     setSuccessMessage(null);
@@ -97,6 +108,7 @@ export default function HomePage() {
       return;
     }
 
+    dismissKeyboard();
     setActionLoading(true);
     setError(null);
     setSuccessMessage(null);

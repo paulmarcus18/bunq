@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import os
@@ -10,11 +11,13 @@ from typing import Any, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from PIL import Image
 
 from models.schemas import AnalysisResponse, DocumentType, RecommendedAction
 
 
 logger = logging.getLogger(__name__)
+MAX_BEDROCK_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 SYSTEM_PROMPT = """You are a financial document parser for a banking app.
@@ -84,6 +87,58 @@ def _extract_json_block(raw_text: str) -> dict[str, Any]:
     if not match:
         raise ValueError("No JSON object found in model response")
     return json.loads(match.group(0))
+
+
+def _prepare_image_for_bedrock(
+    file_bytes: Optional[bytes],
+    content_type: Optional[str],
+) -> tuple[Optional[bytes], Optional[str]]:
+    if not file_bytes or not content_type or not content_type.startswith("image/"):
+        return file_bytes, content_type
+
+    if len(file_bytes) <= MAX_BEDROCK_IMAGE_BYTES:
+        return file_bytes, content_type
+
+    image = Image.open(io.BytesIO(file_bytes))
+
+    if image.mode not in {"RGB", "L"}:
+        # Flatten alpha/transparency onto a white background before JPEG compression.
+        flattened = Image.new("RGB", image.size, "white")
+        alpha_ready = image.convert("RGBA")
+        flattened.paste(alpha_ready, mask=alpha_ready.getchannel("A"))
+        image = flattened
+    elif image.mode == "L":
+        image = image.convert("RGB")
+
+    width, height = image.size
+    candidates = [
+        (2200, 88),
+        (1800, 82),
+        (1600, 78),
+        (1400, 74),
+        (1200, 70),
+        (1024, 66),
+    ]
+
+    for max_dimension, quality in candidates:
+        scale = min(1.0, max_dimension / max(width, height))
+        resized = image
+        if scale < 1.0:
+            resized = image.resize(
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        output = io.BytesIO()
+        resized.save(output, format="JPEG", optimize=True, quality=quality)
+        compressed = output.getvalue()
+        if len(compressed) <= MAX_BEDROCK_IMAGE_BYTES:
+            return compressed, "image/jpeg"
+
+    raise ValueError(
+        "Uploaded image exceeds Bedrock's 5 MB image limit even after compression. "
+        "Try cropping the image or taking a slightly smaller photo."
+    )
 
 
 def _normalize_choice(value: Any) -> str:
@@ -568,6 +623,7 @@ def analyze_document_with_claude(
         return _mock_analysis(optional_text)
 
     try:
+        file_bytes, content_type = _prepare_image_for_bedrock(file_bytes, content_type)
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 900,
