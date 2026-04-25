@@ -728,7 +728,7 @@ function InboxScreen({
 
             {selectedAccount ? (
               <p className="text-sm text-slate-600">
-                FinPilot will create the bunq action from{" "}
+                deBunq will create the bunq action from{" "}
                 <span className="font-semibold text-slate-900">{selectedAccount.description}</span>
                 {selectedAccount.iban ? ` (${selectedAccount.iban})` : ""}.
               </p>

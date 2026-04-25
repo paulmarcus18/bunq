@@ -1,6 +1,6 @@
 # Demo Assets
 
-Curated fictional documents for the FinPilot Inbox demo.
+Curated fictional documents for the deBunq Inbox demo.
 
 Files:
 

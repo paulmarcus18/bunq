@@ -7,10 +7,16 @@ from pydantic import BaseModel, Field
 
 
 class DocumentType(str, Enum):
-    fine = "fine"
+    # Legitimate categories
     invoice = "invoice"
     utility_bill = "utility_bill"
     tax_letter = "tax_letter"
+    fine = "fine"
+    # Scam categories
+    phishing_email = "phishing_email"
+    impersonation_scam = "impersonation_scam"
+    fake_invoice = "fake_invoice"
+    unknown = "unknown"
 
 
 class RecommendedAction(str, Enum):

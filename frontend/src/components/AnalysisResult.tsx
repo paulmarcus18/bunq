@@ -12,8 +12,25 @@ function formatCurrency(amount: number | null, currency: string) {
   }).format(amount);
 }
 
+const DOCUMENT_TYPE_LABEL: Record<string, string> = {
+  invoice: "Invoice",
+  utility_bill: "Utility bill",
+  tax_letter: "Tax letter",
+  fine: "Fine",
+  phishing_email: "Phishing email",
+  impersonation_scam: "Impersonation scam",
+  fake_invoice: "Fake invoice",
+  unknown: "Unclassified request",
+};
+
+const SCAM_TYPES = new Set([
+  "phishing_email",
+  "impersonation_scam",
+  "fake_invoice",
+]);
+
 function labelize(value: string) {
-  return value.replaceAll("_", " ");
+  return DOCUMENT_TYPE_LABEL[value] ?? value.replaceAll("_", " ");
 }
 
 export function AnalysisResult({
@@ -37,14 +54,19 @@ export function AnalysisResult({
     },
   ];
 
+  const isScamType = SCAM_TYPES.has(analysis.document_type);
+  const headerEyebrow = isScamType ? "Scam pattern" : "Document type";
+  const headerEyebrowClass = isScamType ? "text-rose-600" : "text-slate-500";
+  const headerTitleClass = isScamType ? "text-rose-700" : "text-slate-950";
+
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-panel">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Document type
+          <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${headerEyebrowClass}`}>
+            {headerEyebrow}
           </p>
-          <h3 className="mt-2 text-2xl font-semibold capitalize text-slate-950">
+          <h3 className={`mt-2 text-2xl font-semibold ${headerTitleClass}`}>
             {labelize(analysis.document_type)}
           </h3>
         </div>

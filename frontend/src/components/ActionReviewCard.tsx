@@ -17,7 +17,7 @@ export function ActionReviewCard({
         Payment setup
       </p>
       <h3 className="mt-2 text-xl font-semibold text-slate-950">
-        Choose how FinPilot should act
+        Choose how deBunq should act
       </h3>
 
       <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
@@ -74,7 +74,7 @@ export function ActionReviewCard({
           </div>
           {analysis.recommended_action === "schedule_payment" ? (
             <p className="mt-3 text-sm text-slate-600">
-              FinPilot will create a bunq scheduled payment before this due date.
+              deBunq will create a bunq scheduled payment before this due date.
             </p>
           ) : null}
         </div>
@@ -86,7 +86,7 @@ export function ActionReviewCard({
         ) : null}
         {analysis.auto_debit_detected ? (
           <p className="mt-3 text-sm font-medium text-emerald-700">
-            Automatic debit detected. FinPilot is avoiding a duplicate manual payment.
+            Automatic debit detected. deBunq is avoiding a duplicate manual payment.
           </p>
         ) : null}
         {!suspiciousBlocked && !analysis.auto_debit_detected && !analysis.due_date ? (

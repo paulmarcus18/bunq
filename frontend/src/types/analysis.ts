@@ -1,8 +1,12 @@
 export type DocumentType =
-  | "fine"
   | "invoice"
   | "utility_bill"
-  | "tax_letter";
+  | "tax_letter"
+  | "fine"
+  | "phishing_email"
+  | "impersonation_scam"
+  | "fake_invoice"
+  | "unknown";
 
 export type RecommendedAction =
   | "pay_now"

@@ -38,7 +38,11 @@ Return valid JSON only.
 Today's date is __TODAY__. Treat any due_date or invoice date that is on or after today as a normal future date — it is NOT a red flag. Future dates within ~60 days of today are completely standard for invoices.
 
 Extraction rules:
-- document_type must be exactly one of: fine, invoice, utility_bill, tax_letter. Pick the closest match if uncertain.
+- document_type must be exactly one of:
+  Legitimate: invoice, utility_bill, tax_letter, fine.
+  Scam: phishing_email, impersonation_scam, fake_invoice.
+  Fallback: unknown.
+  Use a scam type WHENEVER you set is_suspicious=true. Use phishing_email for spoofed-brand emails / fake support messages. Use impersonation_scam for "Hi mom" / family-emergency / boss-impersonation patterns (especially in voice notes or chat). Use fake_invoice when the request looks like an invoice but issuer or IBAN clearly do not match the claimed brand. Use unknown only when there is genuinely not enough information to categorise.
 - Never invent IBAN, amount, due date, or payment reference. If uncertain, return null.
 - due_date must be YYYY-MM-DD; derive from "due within N days" + invoice/issue date when needed.
 - issuer_name is who issued the request. beneficiary_name is who receives the money.
@@ -277,6 +281,7 @@ def _normalize_due_date(value: Any) -> Optional[str]:
 def _normalize_document_type(value: Any) -> str:
     normalized = _normalize_choice(value)
     aliases = {
+        # Fine
         "payment_notice": DocumentType.fine.value,
         "offence_notice": DocumentType.fine.value,
         "offense_notice": DocumentType.fine.value,
@@ -286,6 +291,7 @@ def _normalize_document_type(value: Any) -> str:
         "penalty": DocumentType.fine.value,
         "boete": DocumentType.fine.value,
         "ticket": DocumentType.fine.value,
+        # Invoice
         "invoice_reminder": DocumentType.invoice.value,
         "payment_reminder": DocumentType.invoice.value,
         "final_notice": DocumentType.invoice.value,
@@ -294,6 +300,9 @@ def _normalize_document_type(value: Any) -> str:
         "insurance_invoice": DocumentType.invoice.value,
         "subscription_notice": DocumentType.invoice.value,
         "subscription_change": DocumentType.invoice.value,
+        "tuition": DocumentType.invoice.value,
+        "tuition_invoice": DocumentType.invoice.value,
+        # Utility
         "bill": DocumentType.utility_bill.value,
         "water_bill": DocumentType.utility_bill.value,
         "energy_bill": DocumentType.utility_bill.value,
@@ -301,16 +310,36 @@ def _normalize_document_type(value: Any) -> str:
         "mobile_bill": DocumentType.utility_bill.value,
         "internet_bill": DocumentType.utility_bill.value,
         "utility": DocumentType.utility_bill.value,
+        # Tax
         "tax": DocumentType.tax_letter.value,
         "tax_bill": DocumentType.tax_letter.value,
         "assessment": DocumentType.tax_letter.value,
         "assessment_notice": DocumentType.tax_letter.value,
         "aanslagbiljet": DocumentType.tax_letter.value,
         "woz": DocumentType.tax_letter.value,
+        # Scam aliases
+        "phishing": DocumentType.phishing_email.value,
+        "phishing_message": DocumentType.phishing_email.value,
+        "phish": DocumentType.phishing_email.value,
+        "spoof": DocumentType.phishing_email.value,
+        "spoofing": DocumentType.phishing_email.value,
+        "fraud_email": DocumentType.phishing_email.value,
+        "scam_email": DocumentType.phishing_email.value,
+        "impersonation": DocumentType.impersonation_scam.value,
+        "family_scam": DocumentType.impersonation_scam.value,
+        "family_emergency_scam": DocumentType.impersonation_scam.value,
+        "hi_mom_scam": DocumentType.impersonation_scam.value,
+        "voice_scam": DocumentType.impersonation_scam.value,
+        "ceo_fraud": DocumentType.impersonation_scam.value,
+        "boss_impersonation": DocumentType.impersonation_scam.value,
+        "fraudulent_invoice": DocumentType.fake_invoice.value,
+        "scam_invoice": DocumentType.fake_invoice.value,
+        "spoofed_invoice": DocumentType.fake_invoice.value,
+        "invoice_fraud": DocumentType.fake_invoice.value,
     }
     if normalized in {item.value for item in DocumentType}:
         return normalized
-    return aliases.get(normalized, DocumentType.invoice.value)
+    return aliases.get(normalized, DocumentType.unknown.value)
 
 
 def _classify_document_type(
@@ -385,6 +414,14 @@ def _classify_document_type(
         "aon",
     ]
 
+    scam_types = {
+        DocumentType.phishing_email,
+        DocumentType.impersonation_scam,
+        DocumentType.fake_invoice,
+    }
+    # Never reclassify a scam type back into a legit one — Claude already decided.
+    if current_type in scam_types:
+        return current_type
     if any(marker in haystack for marker in fine_markers):
         return DocumentType.fine
     if any(marker in haystack for marker in tax_markers):
@@ -395,6 +432,8 @@ def _classify_document_type(
         return DocumentType.invoice
     if current_type in {DocumentType.fine, DocumentType.invoice, DocumentType.utility_bill, DocumentType.tax_letter}:
         return current_type
+    if current_type == DocumentType.unknown:
+        return DocumentType.unknown
     return DocumentType.invoice
 
 
@@ -750,7 +789,11 @@ def _derive_action(analysis: AnalysisResponse, optional_text: Optional[str]) -> 
         beneficiary_iban = None
 
     phishing_signals = list(analysis.phishing_signals)
-    is_suspicious = analysis.is_suspicious
+    is_suspicious = analysis.is_suspicious or document_type in {
+        DocumentType.phishing_email,
+        DocumentType.impersonation_scam,
+        DocumentType.fake_invoice,
+    }
 
     manual_payment_required = analysis.manual_payment_required
     if beneficiary_iban and not auto_debit_detected:
